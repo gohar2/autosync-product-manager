@@ -1,0 +1,1037 @@
+<?php
+/**
+ * Product Importer
+ *
+ * Creates WooCommerce products from AutoSync API data
+ * Follows parent plugin structure for meta fields and attributes
+ *
+ * @package AutoSync_Product_Manager
+ * @since 0.1.0
+ */
+
+// Exit if accessed directly
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+require_once ASM_PLUGIN_DIR . 'includes/class-logger.php';
+require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
+require_once ASM_PLUGIN_DIR . 'includes/class-hash-generator.php';
+require_once ASM_PLUGIN_DIR . 'includes/class-image-downloader.php';
+
+class ASM_Product_Importer {
+
+    /**
+     * Create a product (wheel or tire)
+     *
+     * @param object $api_data Product data from API
+     * @param array $image_urls Image base URLs from API
+     * @param string $type Product type: 'wheel' or 'tire'
+     * @return int|false Product ID or false on failure
+     */
+    /**
+     * Check if we're in optimized batch mode (reduces logging)
+     */
+    private function is_optimized_mode() {
+        return defined('ASM_OPTIMIZED_BATCH_MODE') && ASM_OPTIMIZED_BATCH_MODE === true;
+    }
+
+    public function create_product($api_data, $image_urls = array(), $type = 'wheel') {
+        // Reduced logging in optimized mode
+        if (!$this->is_optimized_mode()) {
+            ASM_Logger::info('=== STARTING PRODUCT CREATION ===', array(
+                'type' => $type,
+                'api_data_type' => gettype($api_data),
+                'has_image_urls' => !empty($image_urls)
+            ));
+        }
+
+        if (!class_exists('WooCommerce')) {
+            if (!$this->is_optimized_mode()) {
+                // ASM_Logger::error('WooCommerce class not found - cannot create product');
+            }
+            return false;
+        }
+
+        // Determine SKU field based on type
+        $sku_field = ($type === 'tire') ? 'PartNumber' : 'Pn';
+        $sku = $api_data->$sku_field ?? '';
+
+        if (empty($sku)) {
+            if (!$this->is_optimized_mode()) {
+                // ASM_Logger::error('Empty SKU in product data - cannot create product', array(
+                //     'type' => $type,
+                //     'sku_field' => $sku_field
+                // ));
+            }
+            return false;
+        }
+
+        // HASH-BASED CHANGE DETECTION
+        // Generate hash from API data (excluding images)
+        $new_hash = ASM_Hash_Generator::generate_hash_from_api_data($api_data, $type);
+        
+        // Generate price_stock_hash from API data
+        $new_price_stock_hash = ASM_Hash_Generator::generate_price_stock_hash_from_api_data($api_data);
+        
+        if (!empty($new_hash)) {
+            // Check if hash matches existing hash
+            $hash_matches = ASM_Hash_Manager::hash_matches($sku, $new_hash);
+            
+            if ($hash_matches) {
+                // Hash matches - product data hasn't changed, skip import
+                if (!$this->is_optimized_mode()) {
+                    // ASM_Logger::info('Product skipped - hash matches (no changes detected)', array(
+                    //     'sku' => $sku,
+                    //     'type' => $type
+                    // ));
+                }
+                // Return existing product ID if available, or special skip indicator
+                $existing_product_id = wc_get_product_id_by_sku($sku);
+                return $existing_product_id ? $existing_product_id : 'skip';
+            }
+            
+            // Hash doesn't match or doesn't exist - proceed with import
+            if (!$this->is_optimized_mode()) {
+                // ASM_Logger::info('Product hash differs or not found - proceeding with import', array(
+                //     'sku' => $sku,
+                //     'type' => $type,
+                //     'hash_exists' => ASM_Hash_Manager::get_hash($sku) !== false
+                // ));
+            }
+        } else {
+            // Hash generation failed - proceed with import but log warning
+            if (!$this->is_optimized_mode()) {
+                // ASM_Logger::warning('Failed to generate hash - proceeding with import', array(
+                //     'sku' => $sku,
+                //     'type' => $type
+                // ));
+            }
+        }
+
+        // Check if product already exists by SKU
+        $product_id = wc_get_product_id_by_sku($sku);
+        $import_mode = get_option('asm_product_import_mode', 'both');
+
+        if ($product_id) {
+            // Product exists
+            if ($import_mode === 'create') {
+                return false; // Skip if mode is create only
+            }
+            // Update existing product - ensure it's a simple product
+            $product = wc_get_product($product_id);
+            if (!$product) {
+                return false;
+            }
+            // Force product type to 'simple' if it's not already
+            if ($product->get_type() !== 'simple') {
+                // Update product type meta to ensure it's simple
+                update_post_meta($product_id, '_product_type', 'simple');
+                // Set product type taxonomy term
+                wp_set_object_terms($product_id, 'simple', 'product_type', false);
+            }
+        } else {
+            // Product doesn't exist
+            if ($import_mode === 'update') {
+                return false; // Skip if mode is update only
+            }
+            // Create new simple product
+            $product = new WC_Product_Simple();
+            if (!$product) {
+                return false;
+            }
+        }
+
+        // Set basic product data
+        $product_name = ($type === 'tire') ? $this->format_tire_title($api_data) : $this->format_wheel_title($api_data);
+        $product_price = $api_data->Price ?? 0;
+        
+        $product->set_name($product_name);
+
+        // Generate slug: title + size + bolt pattern + offset (each included only if available)
+        // Append SKU only on collision
+        $slug_parts = array($product_name);
+        if (!empty($api_data->Diameter) && !empty($api_data->Width)) {
+            $slug_parts[] = $api_data->Diameter . 'x' . $api_data->Width;
+        }
+        if (!empty($api_data->BoltCircle1)) {
+            $slug_parts[] = $api_data->BoltCircle1;
+        }
+        if (!empty($api_data->BoltCircle2)) {
+            $slug_parts[] = $api_data->BoltCircle2;
+        }
+        if (!empty($api_data->BoltPattern1)) {
+            $slug_parts[] = $api_data->BoltPattern1;
+        }
+        if (!empty($api_data->BoltPattern2)) {
+            $slug_parts[] = $api_data->BoltPattern2;
+        }
+        if (!empty($api_data->Offset) || (isset($api_data->Offset) && $api_data->Offset === '0')) {
+            $slug_parts[] = 'et' . $api_data->Offset;
+        }
+        $base_slug = sanitize_title(implode(' ', $slug_parts));
+
+        $existing_post = get_page_by_path($base_slug, OBJECT, 'product');
+        $slug_taken = $existing_post && (!$product_id || $existing_post->ID !== $product_id);
+
+        if ($slug_taken) {
+            $product->set_slug(sanitize_title(implode(' ', $slug_parts) . ' ' . $sku));
+        } else {
+            $product->set_slug($base_slug);
+        }
+
+        $product->set_sku($sku);
+        $product->set_regular_price($product_price);
+        
+        // Set product visibility to visible (catalog and search)
+        $product->set_catalog_visibility('visible');
+
+        // Handle inventory following parent plugin pattern
+        $inventory = isset($api_data->Inventory) ? $api_data->Inventory : '';
+
+        if ($inventory !== '') {
+            // Inventory value exists (could be 0 or positive number)
+            $product->set_manage_stock(true);
+            $product->set_stock_quantity($inventory);
+
+            if ($inventory == 0) {
+                // Explicitly set as out of stock when inventory is 0
+                $product->set_stock_status('outofstock');
+            } else {
+                // In stock when inventory is positive
+                $product->set_stock_status('instock');
+            }
+        } else {
+            // No inventory data - disable stock management
+            $product->set_manage_stock(false);
+            $product->set_stock_status('instock');
+        }
+
+        // Set backorders to "Allow"
+        $product->set_backorders('yes');
+
+        // Set weight if available
+        if (isset($api_data->Weight) && !empty($api_data->Weight)) {
+            $weight = floatval($api_data->Weight);
+            $product->set_weight($weight);
+        }
+
+        // Set categories based on type and brand (following parent plugin pattern)
+        $category_ids = $this->get_or_create_categories($api_data, $type);
+        if (!empty($category_ids)) {
+            $product->set_category_ids($category_ids);
+        }
+
+        // Set tags from VehicleTypeTags and SegmentTags (following parent plugin pattern)
+        $tag_ids = $this->get_or_create_tags($api_data);
+        if (!empty($tag_ids)) {
+            $product->set_tag_ids($tag_ids);
+        }
+
+        // Set product description (Benefits + Features for tires, Description for wheels)
+        if ($type === 'tire') {
+            $description_parts = array();
+            if (isset($api_data->Benefits) && !empty($api_data->Benefits)) {
+                $description_parts[] = '<p><strong>Benefits:</strong> ' . esc_html($api_data->Benefits) . '</p>';
+            }
+            if (isset($api_data->Features) && !empty($api_data->Features)) {
+                $description_parts[] = '<p><strong>Features:</strong> ' . esc_html($api_data->Features) . '</p>';
+            }
+            if (!empty($description_parts)) {
+                $product->set_description(implode('', $description_parts));
+            } elseif (isset($api_data->Description)) {
+                $product->set_description(esc_html($api_data->Description));
+            }
+        } else {
+            // Wheels use simple description
+            if (isset($api_data->Description) && !empty($api_data->Description)) {
+                $product->set_description(esc_html($api_data->Description));
+            }
+        }
+
+        // Set product attributes (following parent plugin pattern)
+        $attributes = $this->get_product_attributes($api_data, $type);
+        if (!empty($attributes)) {
+            $product->set_attributes($attributes);
+        }
+
+        // Save product
+        try {
+            $product_id = $product->save();
+            
+            if (!$product_id || !is_numeric($product_id)) {
+                if (!$this->is_optimized_mode()) {
+                    // ASM_Logger::error('Failed to save product', array(
+                    //     'sku' => $sku,
+                    //     'product_id_returned' => $product_id
+                    // ));
+                }
+                return false;
+            }
+            
+            // Ensure attributes are properly saved with visibility
+            // Re-load product and verify attributes have visibility set correctly
+            // This ensures WooCommerce properly saves the attribute visibility flag
+            if (!empty($attributes)) {
+                $saved_product = wc_get_product($product_id);
+                if ($saved_product) {
+                    // Get current attributes
+                    $saved_attributes = $saved_product->get_attributes();
+                    
+                    // Ensure all attributes have visibility set to true
+                    $attributes_updated = false;
+                    foreach ($saved_attributes as $attribute_key => $attribute) {
+                        if (is_a($attribute, 'WC_Product_Attribute')) {
+                            if (!$attribute->get_visible()) {
+                                $attribute->set_visible(1);
+                                $attributes_updated = true;
+                            }
+                        }
+                    }
+                    
+                    // Re-save if attributes were updated
+                    if ($attributes_updated) {
+                        $saved_product->set_attributes($saved_attributes);
+                        $saved_product->save();
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            if (!$this->is_optimized_mode()) {
+                // ASM_Logger::error('Exception saving product', array(
+                //     'sku' => $sku,
+                //     'exception' => $e->getMessage()
+                // ));
+            }
+            return false;
+        } catch (Error $e) {
+            if (!$this->is_optimized_mode()) {
+                // ASM_Logger::error('Fatal error saving product', array(
+                //     'sku' => $sku,
+                //     'error' => $e->getMessage()
+                // ));
+            }
+            return false;
+        }
+
+        // Set type-specific meta (following parent plugin pattern)
+        if ($type === 'tire') {
+            $this->set_tire_meta($product_id, $api_data, $image_urls);
+        } else {
+            $this->set_wheel_meta($product_id, $api_data, $image_urls);
+        }
+
+        // Save hash after successful product creation/update
+        if (!empty($new_hash) && $product_id && is_numeric($product_id)) {
+            // Get brand from API data
+            $brand = isset($api_data->Brand) ? $api_data->Brand : null;
+            
+            // Save both full hash and price_stock_hash
+            ASM_Hash_Manager::save_hash($sku, $new_hash, $product_id, $type, $brand, $new_price_stock_hash);
+            
+            if (!$this->is_optimized_mode()) {
+                // ASM_Logger::info('Hash saved for product', array(
+                //     'sku' => $sku,
+                //     'product_id' => $product_id,
+                //     'type' => $type,
+                //     'brand' => $brand
+                // ));
+            }
+        }
+
+        return $product_id;
+    }
+
+    /**
+     * Create a simple wheel product (legacy compatibility)
+     *
+     * @param object $api_data Wheel data from API
+     * @param array $image_urls Image base URLs from API
+     * @return int|false Product ID or false on failure
+     */
+    public function create_wheel_product($api_data, $image_urls = array()) {
+        return $this->create_product($api_data, $image_urls, 'wheel');
+    }
+
+    /**
+     * Create a simple tire product
+     *
+     * @param object $api_data Tire data from API
+     * @param array $image_urls Image base URLs from API
+     * @return int|false Product ID or false on failure
+     */
+    public function create_tire_product($api_data, $image_urls = array()) {
+        return $this->create_product($api_data, $image_urls, 'tire');
+    }
+
+    /**
+     * Set wheel product meta fields
+     * Follows exact pattern from parent plugin's pad_vvs_set_product_meta
+     *
+     * @param int $product_id Product ID
+     * @param object $api_data API data
+     * @param array $image_urls Image base URLs
+     */
+    private function set_wheel_meta($product_id, $api_data, $image_urls) {
+        // Core identifiers
+        update_post_meta($product_id, 'p_id_api', $api_data->Id);
+        update_post_meta($product_id, '_sku', $api_data->Pn);
+        update_post_meta($product_id, 'StyleId', 'wgp-' . $api_data->StyleId);
+
+        // Common product fields (Brand, BrandId, Weight)
+        update_post_meta($product_id, 'Brand', $api_data->Brand);
+        update_post_meta($product_id, 'brand_name', $api_data->Brand); // Keep both for compatibility
+
+        if (isset($api_data->BrandId)) {
+            update_post_meta($product_id, 'BrandId', sanitize_text_field($api_data->BrandId));
+        }
+
+        if (isset($api_data->Weight) && !empty($api_data->Weight)) {
+            update_post_meta($product_id, '_weight', floatval($api_data->Weight));
+        }
+
+        // Set WooCommerce backorders meta field to "Allow"
+        update_post_meta($product_id, '_backorders', 'yes');
+
+        // Mark product as AutoSync product
+        update_post_meta($product_id, '_is_autosync_product', 'yes');
+
+        // Wheel-specific specifications
+        update_post_meta($product_id, 'BoltPattern', $this->format_bolt_patterns($api_data)); // Keep typo for compatibility
+        update_post_meta($product_id, 'BoltCircle', $this->format_bolt_circles($api_data)); // Keep typo for compatibility
+
+        $offset = $api_data->Offset ?? '';
+        if (!empty($offset) && !str_contains($offset, 'mm')) {
+            $offset .= ' mm';
+        }
+        update_post_meta($product_id, 'Offset', $offset);
+
+        update_post_meta($product_id, 'Size', $this->format_wheel_size($api_data));
+        update_post_meta($product_id, 'Bore', $api_data->Bore ?? '');
+        update_post_meta($product_id, 'Diameter', $api_data->Diameter ?? '');
+        update_post_meta($product_id, 'Upc', $api_data->Upc ?? '');
+        update_post_meta($product_id, 'Finish', $this->format_finish($api_data));
+        update_post_meta($product_id, 'Width', $api_data->Width ?? '');
+
+        // Image handling based on mode
+        $image_mode = get_option('asm_image_mode', 'external');
+        if ($image_mode === 'download') {
+            // Download images and attach to product
+            ASM_Image_Downloader::download_and_attach_images($product_id, $api_data, $image_urls, 'wheel');
+        } elseif ($image_mode === 'external' && isset($image_urls['img'])) {
+            // External URLs mode - store URLs as meta
+            // Determine CDN base URL based on product type
+            $type = isset($image_urls['type']) ? $image_urls['type'] : 'wheel';
+            if ($type === 'tire') {
+                $image_base = 'https://storage.googleapis.com/autosync_tires/';
+            } else {
+                $image_base = 'https://wheels.autosyncstudio.com/webp/';
+            }
+
+            // Use API-provided base URL if available (overrides default)
+            if (!empty($image_urls['img'])) {
+                $image_base = $image_urls['img'];
+            }
+
+            // Feature image (first image)
+            if (isset($api_data->Img0001) && !empty($api_data->Img0001)) {
+                update_post_meta($product_id, 'feature_img_link', $image_base . $api_data->Img0001);
+            }
+
+            // Dynamically save gallery images (Img0002 onwards)
+            // Check for images from Img0002 to Img0020 (covers most cases)
+            $gallery_index = 1;
+            for ($i = 2; $i <= 20; $i++) {
+                $img_key = 'Img' . str_pad($i, 4, '0', STR_PAD_LEFT); // Format: Img0002, Img0003, etc.
+
+                if (isset($api_data->$img_key) && !empty($api_data->$img_key)) {
+                    update_post_meta($product_id, 'galleryimage' . $gallery_index, $image_base . $api_data->$img_key);
+                    $gallery_index++;
+                }
+            }
+        }
+    }
+
+    /**
+     * Set tire product meta fields
+     * Follows exact pattern from parent plugin's pad_vvs_set_product_meta
+     *
+     * @param int $product_id Product ID
+     * @param object $api_data API data
+     * @param array $image_urls Image base URLs
+     */
+    private function set_tire_meta($product_id, $api_data, $image_urls) {
+       
+        // Core identifiers
+        update_post_meta($product_id, 'p_id_api', $api_data->Id ?? '');
+        update_post_meta($product_id, '_sku', $api_data->PartNumber ?? '');
+
+        // Common product fields (Brand, BrandId, Weight)
+        if (isset($api_data->Brand)) {
+            update_post_meta($product_id, 'Brand', sanitize_text_field($api_data->Brand));
+            update_post_meta($product_id, 'brand_name', sanitize_text_field($api_data->Brand)); // Keep both for compatibility
+        }
+
+        if (isset($api_data->BrandId)) {
+            update_post_meta($product_id, 'BrandId', sanitize_text_field($api_data->BrandId));
+        }
+
+        if (isset($api_data->Weight) && !empty($api_data->Weight)) {
+            update_post_meta($product_id, '_weight', floatval($api_data->Weight));
+        }
+
+        // Set WooCommerce backorders meta field to "Allow"
+        update_post_meta($product_id, '_backorders', 'yes');
+
+        // Mark product as AutoSync product
+        update_post_meta($product_id, '_is_autosync_product', 'yes');
+
+        // Tire-specific specifications (following parent plugin's ajax_create_tires_products_using_api.php lines 467-477)
+        if (isset($api_data->Size)) {
+            update_post_meta($product_id, 'Size', sanitize_text_field($api_data->Size));
+        }
+        if (isset($api_data->Model)) {
+            update_post_meta($product_id, 'Model', sanitize_text_field($api_data->Model));
+        }
+        if (isset($api_data->ModelId)) {
+            update_post_meta($product_id, 'ModelId', 'tgp-' . sanitize_text_field($api_data->ModelId));
+        }
+        if (isset($api_data->OverallDiameter)) {
+            update_post_meta($product_id, 'OverallDiameter', sanitize_text_field($api_data->OverallDiameter));
+        }
+        if (isset($api_data->Sidewall)) {
+            update_post_meta($product_id, 'Sidewall', sanitize_text_field($api_data->Sidewall));
+        }
+        if (isset($api_data->LoadCapacitySingle)) {
+            update_post_meta($product_id, 'LoadCapacitySingle', sanitize_text_field($api_data->LoadCapacitySingle));
+        }
+        if (isset($api_data->MeasuringRimWidth)) {
+            update_post_meta($product_id, 'MeasuringRimWidth', sanitize_text_field($api_data->MeasuringRimWidth));
+        }
+        if (isset($api_data->SpeedRating)) {
+            update_post_meta($product_id, 'SpeedRating', sanitize_text_field($api_data->SpeedRating));
+        }
+        if (isset($api_data->LoadRating)) {
+            update_post_meta($product_id, 'LoadRating', sanitize_text_field($api_data->LoadRating));
+        }
+        if (isset($api_data->LoadRange)) {
+            update_post_meta($product_id, 'LoadRange', sanitize_text_field($api_data->LoadRange));
+        }
+        if (isset($api_data->Diameter)) {
+            update_post_meta($product_id, 'Diameter', sanitize_text_field($api_data->Diameter));
+        }
+        if (isset($api_data->SectionWidth)) {
+            update_post_meta($product_id, 'Width', sanitize_text_field($api_data->SectionWidth));
+            update_post_meta($product_id, 'SectionWidth', sanitize_text_field($api_data->SectionWidth));
+        }
+        if (isset($api_data->Upc)) {
+            update_post_meta($product_id, 'Upc', sanitize_text_field($api_data->Upc));
+        }
+        if (isset($api_data->DisplayName)) {
+            update_post_meta($product_id, 'Description', sanitize_text_field($api_data->DisplayName));
+        }
+
+        // Tire Image handling based on mode
+        $image_mode = get_option('asm_image_mode', 'external');
+        if ($image_mode === 'download') {
+            // Download images and attach to product
+            ASM_Image_Downloader::download_and_attach_images($product_id, $api_data, $image_urls, 'tire');
+        } elseif ($image_mode === 'external') {
+            // External URLs mode - store URLs as meta
+            // Get image base URL from API response or use default tire CDN
+            $image_base = isset($image_urls['img']) && !empty($image_urls['img'])
+                ? $image_urls['img']
+                : 'https://storage.googleapis.com/autosync_tires/';
+
+           
+            // Feature image (ImgAngle)
+            if (!empty($api_data->ImgAngle)) {
+                update_post_meta($product_id, 'feature_img_link', $image_base . $api_data->ImgAngle);
+            }
+
+            // Gallery images for tires (following parent plugin pattern)
+            if (!empty($api_data->ImgFront)) {
+                update_post_meta($product_id, 'galleryimage1', $image_base . $api_data->ImgFront);
+            }
+            if (!empty($api_data->ImgSide1)) {
+                update_post_meta($product_id, 'galleryimage2', $image_base . $api_data->ImgSide1);
+            }
+            if (!empty($api_data->ImgSide2)) {
+                update_post_meta($product_id, 'galleryimage4', $image_base . $api_data->ImgSide2);
+            }
+            if (!empty($api_data->ImgThumb)) {
+                update_post_meta($product_id, 'galleryimage3', $image_base . $api_data->ImgThumb);
+            }
+        }
+    }
+
+    /**
+     * Format wheel product title
+     * Format: Brand Name + Model + Finish
+     *
+     * @param object $api_data API data
+     * @return string Product title
+     */
+    private function format_wheel_title($api_data) {
+        $parts = array();
+
+        if (!empty($api_data->Brand)) {
+            $parts[] = $api_data->Brand;
+        }
+        if (!empty($api_data->ModelName)) {
+            $parts[] = $api_data->ModelName;
+        }
+        if (!empty($api_data->Finish)) {
+            $parts[] = $api_data->Finish;
+        }
+
+        return implode(' ', $parts);
+    }
+
+    /**
+     * Format bolt patterns
+     *
+     * @param object $api_data API data
+     * @return string Formatted bolt pattern
+     */
+    private function format_bolt_patterns($api_data) {
+        $patterns = array();
+
+        if (!empty($api_data->BoltPattern1)) {
+            $patterns[] = $api_data->BoltPattern1;
+        }
+        if (!empty($api_data->BoltPattern2)) {
+            $patterns[] = $api_data->BoltPattern2;
+        }
+
+        return implode(' / ', $patterns);
+    }
+
+    private function format_bolt_circles($api_data) {
+        $circles = array();
+
+        if (!empty($api_data->BoltCircle1)) {
+            $circles[] = $api_data->BoltCircle1;
+        }
+        if (!empty($api_data->BoltCircle2)) {
+            $circles[] = $api_data->BoltCircle2;
+        }
+
+        return implode(' / ', $circles);
+    }
+
+    /**
+     * Format wheel size
+     *
+     * @param object $api_data API data
+     * @return string Formatted size
+     */
+    private function format_wheel_size($api_data) {
+        if (!empty($api_data->Diameter) && !empty($api_data->Width)) {
+            return $api_data->Diameter . ' x ' . $api_data->Width;
+        }
+        return '';
+    }
+
+    /**
+     * Format finish
+     *
+     * @param object $api_data API data
+     * @return string Formatted finish
+     */
+    private function format_finish($api_data) {
+        $parts = array();
+
+        if (!empty($api_data->Finish)) {
+            $parts[] = $api_data->Finish;
+        }
+        if (!empty($api_data->Color)) {
+            $parts[] = $api_data->Color;
+        }
+
+        return implode(' ', $parts);
+    }
+
+    /**
+     * Format tire product title
+     * Format: Brand Name + Model + Size
+     *
+     * @param object $api_data API data
+     * @return string Product title
+     */
+    private function format_tire_title($api_data) {
+        $parts = array();
+
+        if (!empty($api_data->Brand)) {
+            $parts[] = $api_data->Brand;
+        }
+        if (!empty($api_data->Model)) {
+            $parts[] = $api_data->Model;
+        }
+        if (!empty($api_data->Size)) {
+            $parts[] = $api_data->Size;
+        }
+
+        return implode(' ', $parts);
+    }
+
+    /**
+     * Get or create product categories
+     * Creates hierarchical structure: Wheels/Tires (parent) -> Brand (child)
+     *
+     * @param object $api_data API data
+     * @param string $type Product type ('wheel' or 'tire')
+     * @return array Category IDs
+     */
+    private function get_or_create_categories($api_data, $type) {
+        $category_ids = array();
+
+        // 1. Get or create type category (tires or wheels) - PARENT CATEGORY
+        $category_slug = $type === 'tire' ? 'tires' : 'wheels';
+        $category_name = $type === 'tire' ? 'Tires' : 'Wheels';
+        
+        $term = get_term_by('slug', $category_slug, 'product_cat');
+        if ($term) {
+            $type_term_id = $term->term_id;
+            $category_ids[] = $type_term_id;
+        } else {
+            // Type category doesn't exist, create it as parent (parent = 0)
+            $new_type_term = wp_insert_term(
+                $category_name,
+                'product_cat',
+                array(
+                    'slug' => $category_slug,
+                    'parent' => 0
+                )
+            );
+
+            if (!is_wp_error($new_type_term)) {
+                $type_term_id = $new_type_term['term_id'];
+                $category_ids[] = $type_term_id;
+            } else {
+                // If creation failed, return early
+                return $category_ids;
+            }
+        }
+
+        // 2. Get or create brand category - CHILD OF TYPE CATEGORY
+        if (isset($api_data->Brand) && !empty($api_data->Brand)) {
+            $brand_name = sanitize_text_field($api_data->Brand);
+            $brand_slug = sanitize_title($brand_name);
+
+            // Check if brand category exists
+            $brand_term = get_term_by('slug', $brand_slug, 'product_cat');
+
+            if (!$brand_term) {
+                // Brand category doesn't exist, create it as child of type category
+                $new_term = wp_insert_term(
+                    $brand_name,  // Category name
+                    'product_cat', // Taxonomy
+                    array(
+                        'slug' => $brand_slug,
+                        'parent' => $type_term_id  // Set parent to wheels/tires category
+                    )
+                );
+
+                if (!is_wp_error($new_term)) {
+                    $category_ids[] = $new_term['term_id'];
+                }
+            } else {
+                // Brand category exists - check if parent is correct
+                if ($brand_term->parent != $type_term_id) {
+                    // Update parent to be type category
+                    wp_update_term(
+                        $brand_term->term_id,
+                        'product_cat',
+                        array('parent' => $type_term_id)
+                    );
+                }
+                // Use existing brand category
+                $category_ids[] = $brand_term->term_id;
+            }
+        }
+
+        return $category_ids;
+    }
+
+    /**
+     * Get or create product tags
+     * Follows parent plugin pattern from ajax_create_tires_products_using_api.php and ajax_create_wheels_products_using_api.php
+     *
+     * @param object $api_data API data
+     * @return array Tag IDs
+     */
+    private function get_or_create_tags($api_data) {
+        $tag_ids = array();
+
+        // 1. Process VehicleTypeTags
+        if (isset($api_data->VehicleTypeTags) && is_array($api_data->VehicleTypeTags)) {
+            foreach ($api_data->VehicleTypeTags as $tag_name) {
+                if (empty($tag_name)) {
+                    continue;
+                }
+
+                // Check if tag already exists
+                $tag_term = get_term_by('slug', sanitize_title($tag_name), 'product_tag');
+
+                if (!$tag_term) {
+                    // Tag doesn't exist, create it
+                    $new_tag = wp_insert_term($tag_name, 'product_tag');
+
+                    if (!is_wp_error($new_tag)) {
+                        $tag_ids[] = $new_tag['term_id'];
+                    }
+                } else {
+                    // Tag exists, use it
+                    $tag_ids[] = $tag_term->term_id;
+                }
+            }
+        }
+
+        // 2. Process SegmentTags
+        if (isset($api_data->SegmentTags) && is_array($api_data->SegmentTags)) {
+            foreach ($api_data->SegmentTags as $tag_name) {
+                if (empty($tag_name)) {
+                    continue;
+                }
+
+                // Check if tag already exists
+                $tag_term = get_term_by('slug', sanitize_title($tag_name), 'product_tag');
+
+                if (!$tag_term) {
+                    // Tag doesn't exist, create it
+                    $new_tag = wp_insert_term($tag_name, 'product_tag');
+
+                    if (!is_wp_error($new_tag)) {
+                        $tag_ids[] = $new_tag['term_id'];
+                    }
+                } else {
+                    // Tag exists, use it
+                    $tag_ids[] = $tag_term->term_id;
+                }
+            }
+        }
+
+        return $tag_ids;
+    }
+
+    /**
+     * Register or get global WooCommerce attribute
+     * 
+     * @param string $attribute_name Attribute name (e.g., 'Brand', 'Model')
+     * @return int|false Attribute ID or false on failure
+     */
+    private function register_global_attribute($attribute_name) {
+        global $wpdb;
+        
+        if (empty($attribute_name)) {
+            return false;
+        }
+        
+        // Get slug from mapping, fallback to sanitized name if not in mapping
+        $attribute_slug = isset(self::$attribute_slug_map[$attribute_name]) 
+            ? self::$attribute_slug_map[$attribute_name] 
+            : wc_sanitize_taxonomy_name($attribute_name);
+        $attribute_id = wc_attribute_taxonomy_id_by_name($attribute_slug);
+        
+        // If attribute already exists, return its ID
+        if ($attribute_id) {
+            return $attribute_id;
+        }
+        
+        // Register new global attribute
+        // Note: wc_create_attribute expects 'name' as slug and 'label' as display name
+        $args = array(
+            'name' => $attribute_slug, // Slug goes in 'name' field
+            'slug' => $attribute_slug,
+            'type' => 'select',
+            'order_by' => 'menu_order',
+            'has_archives' => false,
+        );
+        
+        $attribute_id = wc_create_attribute($args);
+        
+        if (is_wp_error($attribute_id)) {
+            return false;
+        }
+        
+        // Update label to use the display name
+        if ($attribute_id && !is_wp_error($attribute_id)) {
+            global $wpdb;
+            $wpdb->update(
+                $wpdb->prefix . 'woocommerce_attribute_taxonomies',
+                array('attribute_label' => $attribute_name),
+                array('attribute_id' => $attribute_id),
+                array('%s'),
+                array('%d')
+            );
+        }
+        
+        // Register taxonomy
+        $taxonomy_name = wc_attribute_taxonomy_name($attribute_slug);
+        register_taxonomy($taxonomy_name, array('product'), array());
+        
+        return $attribute_id;
+    }
+    
+    /**
+     * Get or create taxonomy term for attribute value
+     * 
+     * @param string $attribute_slug Attribute slug (taxonomy name)
+     * @param string $term_value Term value/name
+     * @return int|false Term ID or false on failure
+     */
+    private function get_or_create_attribute_term($attribute_slug, $term_value) {
+        if (empty($term_value) || empty($attribute_slug)) {
+            return false;
+        }
+        
+        $taxonomy_name = wc_attribute_taxonomy_name($attribute_slug);
+        
+        // Check if term exists
+        $term = get_term_by('name', $term_value, $taxonomy_name);
+        
+        if ($term && !is_wp_error($term)) {
+            return $term->term_id;
+        }
+        
+        // Create new term
+        $term_data = wp_insert_term($term_value, $taxonomy_name);
+        
+        if (is_wp_error($term_data)) {
+            return false;
+        }
+        
+        return isset($term_data['term_id']) ? $term_data['term_id'] : false;
+    }
+    
+    /**
+     * Get product attributes using global WooCommerce attributes
+     * Creates global attributes and taxonomy terms for filtering
+     *
+     * @param object $api_data API data
+     * @param string $type Product type ('wheel' or 'tire')
+     * @return array WC_Product_Attribute objects with global taxonomy
+     */
+    private function get_product_attributes($api_data, $type) {
+        $attributes = array();
+
+        if ($type === 'tire') {
+            // Tire attributes - all original attributes, using mapping for specified ones
+            $attribute_array = array(
+                'P/N' => $api_data->PartNumber ?? '',
+                'Brand' => $api_data->Brand ?? '',
+                'Model' => $api_data->Model ?? '',
+                'TireModels' => $api_data->Model ?? '', // Also add mapped version
+                'Asin' => $api_data->Asin ?? '',
+                'Size' => $api_data->Size ?? '',
+                'TireSize' => $api_data->Size ?? '', // Also add mapped version
+                'Overall Diameter' => $api_data->OverallDiameter ?? '',
+                'RimDiameter' => $api_data->OverallDiameter ?? '', // Also add mapped version
+                'Section Width' => $api_data->SectionWidth ?? '',
+                'SectionWidth' => $api_data->SectionWidth ?? '', // Also add mapped version
+                'Overall Width' => $api_data->OverallWidth ?? '',
+                'Load Capacity Single' => $api_data->LoadCapacitySingle ?? '',
+                'Load Range' => $api_data->LoadRange ?? '',
+                'Measuring Rim Width' => $api_data->MeasuringRimWidth ?? '',
+                'Aspect Ratio' => $api_data->AspectRatio ?? '',
+                'AspectRatio' => $api_data->AspectRatio ?? '', // Also add mapped version
+                'Tread Depth' => $api_data->TreadDepth ?? '',
+                'Weight' => $api_data->Weight ?? '',
+                'Max Inflation Pressure' => $api_data->MaxInflationPressure ?? '',
+                'Revolutions Per Mile' => $api_data->RevolutionsPerMile ?? '',
+                'Speed Rating' => $api_data->SpeedRating ?? '',
+                'Load Rating' => $api_data->LoadRating ?? '',
+                'TireLoadRating' => $api_data->LoadRating ?? '', // Also add mapped version
+                'Ean' => $api_data->Ean ?? '',
+                'Warranty' => $api_data->Warranty ?? '',
+                'Sidewall' => $api_data->Sidewall ?? '',
+                'Diameter' => $api_data->Diameter ?? '',
+            );
+        } else {
+            // Wheel attributes - all original attributes, using mapping for specified ones
+            $bolt_patterns = array();
+            if (!empty($api_data->BoltPattern1)) {
+                $bolt_patterns[] = $api_data->BoltPattern1;
+            }
+            if (!empty($api_data->BoltPattern2)) {
+                $bolt_patterns[] = $api_data->BoltPattern2;
+            }
+            
+            $finish_parts = array();
+            if (!empty($api_data->Finish)) {
+                $finish_parts[] = $api_data->Finish;
+            }
+            if (!empty($api_data->Color)) {
+                $finish_parts[] = $api_data->Color;
+            }
+            
+            $attribute_array = array(
+                'PN' => $api_data->Pn ?? '',
+                'Brand' => $api_data->Brand ?? '',
+                'Model' => $api_data->ModelName ?? '',
+                'Finish' => $this->format_finish($api_data),
+                'Size' => $this->format_wheel_size($api_data),
+                'WheelSize' => $this->format_wheel_size($api_data), // Also add mapped version
+                'BoltPatterns' => $this->format_bolt_patterns($api_data),
+                'Diameter' => $api_data->Diameter ?? '',
+                'Gdiameter' => $api_data->Diameter ?? '', // Also add mapped version
+                'Offset' => $api_data->Offset ?? '',
+                'Bore' => $api_data->Bore ?? '',
+                'Load Rating' => $api_data->LoadRating ?? '',
+                'Structure' => $api_data->Structure ?? '',
+                'Material' => $api_data->Material ?? '',
+                'Weight' => $api_data->Weight ?? '',
+                'Width' => $api_data->Width ?? '',
+                'InchWidth' => $api_data->Width ?? '', // Also add mapped version
+                'BoltCircle' => $api_data->BoltCircle1 ?? '',
+                'BoltCircle2' => $api_data->BoltCircle2 ?? '',
+                'LugCount' => $api_data->LugCount ?? '',
+                'StyleId' => $api_data->StyleId ?? '',
+            );
+        }
+
+        $position = 0;
+        foreach ($attribute_array as $key => $value) {
+            if (!empty($value) && $value !== '') {
+                // Register global attribute if it doesn't exist
+                $attribute_id = $this->register_global_attribute($key);
+                
+                if (!$attribute_id) {
+                    continue; // Skip if attribute registration failed
+                }
+                
+                // Get attribute slug from mapping, fallback to sanitized name if not in mapping
+                $attribute_slug = isset(self::$attribute_slug_map[$key]) 
+                    ? self::$attribute_slug_map[$key] 
+                    : wc_sanitize_taxonomy_name($key);
+                $taxonomy_name = wc_attribute_taxonomy_name($attribute_slug);
+                
+                // Ensure taxonomy is registered
+                if (!taxonomy_exists($taxonomy_name)) {
+                    register_taxonomy($taxonomy_name, array('product'), array());
+                }
+                
+                // Get or create term for this attribute value
+                $term_id = $this->get_or_create_attribute_term($attribute_slug, strval($value));
+                
+                if (!$term_id) {
+                    continue; // Skip if term creation failed
+                }
+                
+                // Create WC_Product_Attribute with global taxonomy
+                $attribute = new WC_Product_Attribute();
+                $attribute->set_id($attribute_id);
+                $attribute->set_name($taxonomy_name); // Use taxonomy name for global attributes
+                $attribute->set_options(array($term_id)); // Use term ID instead of string value
+                $attribute->set_position($position);
+                $attribute->set_visible(1);
+                $attribute->set_variation(0);
+                $attributes[] = $attribute;
+                $position++;
+            }
+        }
+
+        return $attributes;
+    }
+}

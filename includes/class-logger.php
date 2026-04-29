@@ -1,0 +1,90 @@
+<?php
+/**
+ * Logger Class
+ *
+ * WooCommerce logging wrapper for AutoSync Product Manager
+ *
+ * @package AutoSync_Product_Manager
+ * @since 0.1.0
+ */
+
+// Exit if accessed directly
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class ASM_Logger {
+
+    /**
+     * Logger instance
+     */
+    private static $logger = null;
+
+    /**
+     * Whether logging is enabled
+     * Set to false to disable all logging
+     */
+    private static $logging_enabled = true;
+
+    /**
+     * Get logger instance
+     */
+    private static function get_logger() {
+        if (null === self::$logger) {
+            self::$logger = wc_get_logger();
+        }
+        return self::$logger;
+    }
+
+    /**
+     * Check if logging is enabled
+     */
+    private static function is_logging_enabled() {
+        // Allow override via constant or filter
+        if (defined('ASM_LOGGING_ENABLED')) {
+            return ASM_LOGGING_ENABLED;
+        }
+        return apply_filters('asm_logging_enabled', self::$logging_enabled);
+    }
+
+    /**
+     * Log info message
+     */
+    public static function info($message, $context = array()) {
+        if (!self::is_logging_enabled()) {
+            return;
+        }
+        self::get_logger()->info($message, array_merge(array('source' => 'autosync-product-manager'), $context));
+    }
+
+    /**
+     * Log error message
+     */
+    public static function error($message, $context = array()) {
+        if (!self::is_logging_enabled()) {
+            return;
+        }
+        self::get_logger()->error($message, array_merge(array('source' => 'autosync-product-manager'), $context));
+    }
+
+    /**
+     * Log warning message
+     */
+    public static function warning($message, $context = array()) {
+        if (!self::is_logging_enabled()) {
+            return;
+        }
+        self::get_logger()->warning($message, array_merge(array('source' => 'autosync-product-manager'), $context));
+    }
+
+    /**
+     * Log debug message
+     */
+    public static function debug($message, $context = array()) {
+        if (!self::is_logging_enabled()) {
+            return;
+        }
+        self::get_logger()->debug($message, array_merge(array('source' => 'autosync-product-manager'), $context));
+    }
+}
+

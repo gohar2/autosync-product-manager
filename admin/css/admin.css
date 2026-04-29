@@ -1,0 +1,168 @@
+/**
+ * Admin Styles for AutoSync Product Manager
+ *
+ * @package AutoSync_Product_Manager
+ * @since 0.1.0
+ */
+
+.nav-tab-wrapper {
+    margin: 20px 0 0 0;
+}
+
+.asm-tab-content {
+    display: none;
+}
+
+.asm-tab-content.active {
+    display: block;
+}
+
+.asm-container {
+    max-width: 1200px;
+    margin: 20px 0;
+}
+
+.asm-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.asm-card h2 {
+    margin-top: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.asm-card h3 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.asm-card ul {
+    margin-left: 20px;
+}
+
+.asm-card ul li {
+    margin-bottom: 5px;
+}
+
+.asm-info-card {
+    background: #f0f6fc;
+    border-left: 4px solid #2271b1;
+}
+
+#asm-test-result {
+    padding: 15px;
+    border-radius: 4px;
+}
+
+#asm-test-result.success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+#asm-test-result.error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+#asm-test-result.loading {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+}
+
+#asm-test-api:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.asm-status-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 10px;
+}
+
+.asm-status-badge.active {
+    background: #d4edda;
+    color: #155724;
+}
+
+.asm-status-badge.pending {
+    background: #fff3cd;
+    color: #856404;
+}
+
+/* Import result styles */
+#asm-import-result,
+#asm-bulk-result {
+    padding: 15px;
+    border-radius: 4px;
+}
+
+#asm-import-result.success,
+#asm-bulk-result.success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+#asm-import-result.error,
+#asm-bulk-result.error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+#asm-import-result.loading,
+#asm-bulk-result.loading {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+}
+
+/* Progress bar */
+.asm-progress-bar {
+    width: 100%;
+    height: 30px;
+    background: #f0f0f1;
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.asm-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2271b1 0%, #135e96 100%);
+    width: 0%;
+    transition: width 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.asm-progress-text {
+    font-size: 14px;
+    color: #50575e;
+    margin: 0;
+}
+
+#asm-bulk-import:disabled,
+#asm-import-test:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
