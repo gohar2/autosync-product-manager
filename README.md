@@ -56,16 +56,16 @@ AutoSync Product Manager synchronizes wheel and tire products from AutoSync Stud
    - Clear price/stock hash values
    - Duplicate SKU detection
 
-4. **Automated Price and Stock Synchronization**
-   - Price/stock sync runs every 12 minutes (configurable)
+4. **External Price and Stock Synchronization**
+   - Price/stock sync runs only when your external cron job calls it
    - Updates only when price/stock hash changes
    - Batch processing for performance
    - Only updates existing products (requires full sync first)
 
-5. **Automated Daily Full Product Sync**
-   - WordPress cron-based daily sync at 2:00 AM
-   - Syncs all active brands automatically
-   - External cron support via HTTP endpoints
+5. **External Full Product Sync**
+   - Syncs all active brands when your CLI or HTTP cron endpoint is called
+   - No internal WordPress scheduling is registered
+   - External cron support via CLI and HTTP endpoints
    - Sync status tracking and reporting
 
 6. **Email Notifications**
@@ -102,7 +102,6 @@ AutoSync Product Manager synchronizes wheel and tire products from AutoSync Stud
 11. **Advanced Sync Settings**
     - Product import mode (Create, Update, or Both)
     - Image storage mode (External URLs or Download)
-    - Configurable sync intervals
     - Manual sync triggers from Brand Management page
 
 ---
@@ -178,10 +177,10 @@ Configure via **WooCommerce** → **Settings** → **Emails** → **Product Sync
 
 ### Overview
 
-The plugin supports two types of automated syncing:
+The plugin supports two external sync jobs:
 
-1. **Full Product Sync** - Daily at 2:00 AM (syncs all product data)
-2. **Price/Stock Sync** - Every 10-12 minutes (updates only price and stock)
+1. **Full Product Sync** - Runs when your full-sync cron command calls the plugin
+2. **Price/Stock Sync** - Runs when your price/stock cron command calls the plugin
 
 ### Why External Cron?
 
@@ -238,7 +237,7 @@ https://yoursite.com/?asm_cron_run=1&key=your-very-secure-secret-key-here
 1. Log into cPanel
 2. Go to **Cron Jobs**
 3. Add new cron job:
-   - **Minute:** `*/10` (every 10 minutes) or `*/12` (every 12 minutes)
+   - **Minute:** `0` for hourly, or your preferred external interval
    - **Hour:** `*`
    - **Day:** `*`
    - **Month:** `*`
@@ -251,11 +250,11 @@ https://yoursite.com/?asm_cron_run=1&key=your-very-secure-secret-key-here
 #### SSH/crontab
 
 ```bash
-# Every 10 minutes
-*/10 * * * * /usr/bin/php /path/to/cron/price-stock-cron-runner.php >> /var/log/asm-price-stock-cron.log 2>&1
+# Every hour
+0 * * * * /usr/bin/php /path/to/cron/price-stock-cron-runner.php >> /var/log/asm-price-stock-cron.log 2>&1
 
 # Or HTTP method:
-*/10 * * * * curl -s "https://yoursite.com/?asm_price_stock_sync=1&key=your-secret-key" > /dev/null 2>&1
+0 * * * * curl -s "https://yoursite.com/?asm_price_stock_sync=1&key=your-secret-key" > /dev/null 2>&1
 ```
 
 ### Finding Your WordPress Path
@@ -449,7 +448,7 @@ wp-content/plugins/autosync-product-manager/
 │   ├── class-hash-manager.php         # Hash storage & change detection
 │   ├── class-hash-generator.php       # Hash generation
 │   ├── class-brand-manager.php        # Brand management
-│   ├── class-cron-sync.php            # Cron sync (WordPress & External)
+│   ├── class-cron-sync.php            # External full product sync
 │   ├── class-price-stock-sync.php    # Price/Stock sync
 │   ├── class-sql-batch-inserter.php  # Optimized batch insertion
 │   ├── class-sync-status-manager.php # Sync status tracking

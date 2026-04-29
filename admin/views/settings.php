@@ -378,44 +378,6 @@ if (!defined('ABSPATH')) {
                 </div>
                 */?>
             </div>
-
-            <!-- Automatic Sync (Action Scheduler) Section -->
-            <!-- <div class="asm-card" style="margin-top: 20px;">
-                <h2>Automatic Sync (Action Scheduler)</h2>
-                <p>Products from all active brands are automatically synced daily at 2:00 AM using Action Scheduler.</p>
-                
-                <?php
-                require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
-                $cron_status = ASM_Cron_Sync::get_cron_status();
-                ?>
-                <table class="form-table">
-                    <tr>
-                        <th scope="row">WordPress Cron Status</th>
-                        <td>
-                            <?php if (!$cron_status['wp_cron_enabled']): ?>
-                                <span style="color: #d63638;">✗ WordPress Cron Disabled</span><br>
-                                <small style="color: #d63638;">WP-CRON is disabled. Please enable it or use a real cron job to trigger the sync.</small>
-                            <?php elseif ($cron_status['scheduled']): ?>
-                                <span style="color: #00a32a;">✓ Scheduled</span><br>
-                                <small>Next sync: <?php echo esc_html($cron_status['next_run']); ?></small><br>
-                                <small style="color: #646970;">Hook: <code><?php echo esc_html($cron_status['hook']); ?></code> | Schedule: <code><?php echo esc_html($cron_status['schedule']); ?></code></small>
-                            <?php else: ?>
-                                <span style="color: #d63638;">✗ Not Scheduled</span><br>
-                                <small>Click "Save Changes" or reactivate the plugin to schedule the sync.</small>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                </table>
-                
-                <p class="description">
-                    WordPress Cron will automatically sync all active brands (both wheels and tires) every day at 2:00 AM.
-                    No manual action is required. Products are fetched and stored directly using the optimized batch insertion system.
-                    <br><br>
-                    <strong>Note:</strong> For better reliability on production sites, consider using a real cron job instead of WP-Cron. 
-                    You can use a cron tool plugin to manage this, or set up a server cron job that calls: 
-                    <code>wp cron event run asm_daily_sync_all_brands</code>
-                </p>
-            </div> -->
         </div>
 
         <!-- Helper Tab -->

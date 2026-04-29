@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AutoSync Product Manager
  * Plugin URI: https://sdtireandwheel.com
- * Description: Simple product synchronization from AutoSync Studio API (Cron-based) and extra product deletion functionality.
+ * Description: Simple product synchronization from AutoSync Studio API using external cron endpoints and extra product deletion functionality.
  * Version: 5.2
  * Author: Syed
  * Author URI: https://sdtireandwheel.com
@@ -36,6 +36,11 @@ class AutoSync_Product_Manager {
      * API Client instance
      */
     private $api_client;
+
+    /**
+     * Tracks the one-time cleanup that removes schedules created by older versions.
+     */
+    private const LEGACY_CRON_CLEANUP_OPTION = 'asm_internal_wp_cron_disabled_at';
 
     /**
      * Get singleton instance
@@ -130,24 +135,11 @@ class AutoSync_Product_Manager {
         // Register settings
         add_action('admin_init', array($this, 'register_settings'));
 
-        // Register WordPress cron sync
-        // NOTE: For 80,000+ products, use external cron instead (see EXTERNAL-CRON-SETUP.md)
-        // Uncomment the line below only if you want to use WordPress cron (not recommended for large syncs)
-        add_action('admin_init', array($this, 'register_cron_sync'));
-        
-        // Register WordPress cron for price/stock sync (runs every 12 minutes)
-        add_action('admin_init', array($this, 'register_price_stock_cron'));
+        // Remove any WP-Cron events scheduled by older plugin versions.
+        add_action('init', array($this, 'disable_internal_cron_events'), 1);
         
         // Handle activation redirect
         add_action('admin_init', array($this, 'handle_activation_redirect'));
-        
-        // Register WordPress cron hooks
-        // NOTE: For external cron, you can comment these out and use cron/cron-runner.php instead
-        // add_action(ASM_Cron_Sync::CRON_HOOK, array('ASM_Cron_Sync', 'sync_all_active_brands'));
-        
-        // Load price/stock sync class for cron hook
-        require_once ASM_PLUGIN_DIR . 'includes/class-price-stock-sync.php';
-        add_action(ASM_Price_Stock_Sync::CRON_HOOK, array('ASM_Price_Stock_Sync', 'sync_all_brands'));
     }
 
     /**
@@ -1283,22 +1275,31 @@ class AutoSync_Product_Manager {
     }
 
     /**
-     * Register cron sync on admin init
+     * Clear legacy WP-Cron events once after this external-cron-only version loads.
      */
-    public function register_cron_sync() {
-        ASM_Cron_Sync::register_cron();
+    public function disable_internal_cron_events() {
+        if (get_option(self::LEGACY_CRON_CLEANUP_OPTION)) {
+            return;
+        }
+
+        if (self::clear_internal_cron_events()) {
+            update_option(self::LEGACY_CRON_CLEANUP_OPTION, time(), false);
+        }
     }
 
     /**
-     * Register WordPress cron for price/stock sync
-     * Runs every 12 minutes by default
+     * Remove plugin-owned WP-Cron schedules left behind by older versions.
      */
-    public function register_price_stock_cron() {
+    private static function clear_internal_cron_events() {
+        require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-price-stock-sync.php';
-        
-        // Get interval from settings or use default (12 minutes)
-        $interval_minutes = get_option('asm_price_stock_sync_interval', 12);
-        ASM_Price_Stock_Sync::register_cron($interval_minutes);
+
+        $full_sync_cleared = ASM_Cron_Sync::unregister_cron();
+        $price_stock_cleared = ASM_Price_Stock_Sync::unregister_cron();
+
+        delete_option('asm_price_stock_sync_interval');
+
+        return $full_sync_cleared !== false && $price_stock_cleared !== false;
     }
 
     /**
@@ -1352,7 +1353,6 @@ class AutoSync_Product_Manager {
         // Load required files
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-brand-manager.php';
-        require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-cron-lock-log.php';
 
         // Create hash table
@@ -1361,8 +1361,9 @@ class AutoSync_Product_Manager {
         // Create cron lock log table
         ASM_Cron_Lock_Log::create_table();
         
-        // Register cron sync on activation
-        ASM_Cron_Sync::register_cron();
+        // Older versions scheduled WP-Cron events; this version is external-cron only.
+        self::clear_internal_cron_events();
+        update_option(self::LEGACY_CRON_CLEANUP_OPTION, time(), false);
         
         // Set transient to trigger redirect after activation
         // Only redirect if not bulk activation
@@ -1378,15 +1379,14 @@ class AutoSync_Product_Manager {
 
     /**
      * Plugin deactivation hook - Static method
-     * Cleanup: Drop hash table, unregister cron, and delete wp_options
+     * Cleanup: Drop hash table, clear legacy schedules, and delete wp_options
      */
     public static function deactivate() {
         // Load required files
-        require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
         
-        // Unregister cron sync on deactivation
-        ASM_Cron_Sync::unregister_cron();
+        // Clear plugin-owned WP-Cron events on deactivation.
+        self::clear_internal_cron_events();
         
         // Drop hash table on deactivation
         ASM_Hash_Manager::drop_table();
@@ -1401,7 +1401,9 @@ class AutoSync_Product_Manager {
             'asm_products_brands',
             'asm_products_sync_status',
             'asm_settings',
-            'asm_sync_settings'
+            'asm_sync_settings',
+            'asm_price_stock_sync_interval',
+            self::LEGACY_CRON_CLEANUP_OPTION
         );
         
         global $wpdb;
@@ -1445,11 +1447,10 @@ class AutoSync_Product_Manager {
             define('ASM_PLUGIN_DIR', plugin_dir_path(__FILE__));
         }
         
-        require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
         
-        // Unregister cron sync
-        ASM_Cron_Sync::unregister_cron();
+        // Clear plugin-owned WP-Cron events.
+        self::clear_internal_cron_events();
         
         // Drop hash table
         ASM_Hash_Manager::drop_table();
@@ -1463,7 +1464,9 @@ class AutoSync_Product_Manager {
             'asm_products_brands',
             'asm_products_sync_status',
             'asm_settings',
-            'asm_sync_settings'
+            'asm_sync_settings',
+            'asm_price_stock_sync_interval',
+            self::LEGACY_CRON_CLEANUP_OPTION
         );
         
         global $wpdb;

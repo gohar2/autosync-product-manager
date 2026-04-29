@@ -2,7 +2,7 @@
 /**
  * Price Stock Sync Class
  *
- * Handles price and stock synchronization for products
+ * Handles price and stock synchronization for external cron runners and public endpoints.
  * Only updates price and stock when price_stock_hash changes
  *
  * @package AutoSync_Product_Manager
@@ -25,7 +25,7 @@ require_once ASM_PLUGIN_DIR . 'includes/class-cron-lock-log.php';
 class ASM_Price_Stock_Sync {
 
     /**
-     * WordPress cron hook name for price/stock sync
+     * Legacy WordPress cron hook name, kept only to clear old scheduled events.
      */
     const CRON_HOOK = 'asm_price_stock_sync_cron';
 
@@ -36,9 +36,8 @@ class ASM_Price_Stock_Sync {
      * @return array Statistics
      */
     public static function sync_all_brands() {
-        // Lock file overlap protection — prevents multiple concurrent sync processes
-        // from spawning when a previous run is still in progress (catalog can take 38+ min,
-        // cron fires every 12 min, so without this we accumulate 3-4 concurrent processes).
+        // Lock file overlap protection prevents multiple external requests from running
+        // the same long price/stock sync at the same time.
         $lock_file = WP_CONTENT_DIR . '/autosync-price-stock.lock';
         $lock_timeout = 45 * 60; // 45 min auto-expire for stale locks
 
@@ -1013,86 +1012,10 @@ class ASM_Price_Stock_Sync {
     }
 
     /**
-     * Register WordPress cron event for price/stock sync
-     * Schedules to run every 12 minutes
-     * 
-     * @param int $interval_minutes Interval in minutes (default: 12)
-     * @return bool True if scheduled successfully
-     */
-    public static function register_cron($interval_minutes = 12) {
-        // Register custom schedule
-        self::register_cron_schedule($interval_minutes);
-
-        // Check if cron is already scheduled
-        $timestamp = wp_next_scheduled(self::CRON_HOOK);
-        
-        if (!$timestamp) {
-            // Schedule recurring event
-            $interval_seconds = $interval_minutes * 60;
-            $next_run = time() + $interval_seconds; // Start in X minutes
-            
-            $scheduled = wp_schedule_event(
-                $next_run,              // First run time
-                'asm_price_stock_' . $interval_minutes . 'min', // Schedule name
-                self::CRON_HOOK         // Hook name
-            );
-            
-            if ($scheduled !== false) {
-                // ASM_Logger::info('WordPress Cron: Price/Stock sync scheduled', array(
-                //     'hook' => self::CRON_HOOK,
-                //     'interval_minutes' => $interval_minutes,
-                //     'next_run' => date('Y-m-d H:i:s', $next_run),
-                //     'timestamp' => $next_run
-                // ));
-                return true;
-            } else {
-                // ASM_Logger::error('Failed to schedule WordPress cron event for price/stock sync');
-                return false;
-            }
-        }
-        
-        // Cron already scheduled
-        return true;
-    }
-
-    /**
-     * Register custom cron schedule for price/stock sync
-     * 
-     * @param int $interval_minutes Interval in minutes
-     */
-    private static function register_cron_schedule($interval_minutes) {
-        // add_filter('cron_schedules', function($schedules) use ($interval_minutes) {
-        //     $schedule_name = 'asm_price_stock_' . $interval_minutes . 'min';
-            
-        //     if (!isset($schedules[$schedule_name])) {
-        //         $schedules[$schedule_name] = array(
-        //             'interval' => $interval_minutes * 60, // Convert to seconds
-        //             'display' => sprintf(__('Every %d Minutes', 'autosync-product-manager'), $interval_minutes)
-        //         );
-        //     }
-        //     return $schedules;
-        // });
-    }
-
-    /**
-     * Unregister WordPress cron event for price/stock sync
+     * Clear legacy WordPress cron events for price/stock sync.
      */
     public static function unregister_cron() {
-        $timestamp = wp_next_scheduled(self::CRON_HOOK);
-        
-        if ($timestamp) {
-            $unscheduled = wp_unschedule_event($timestamp, self::CRON_HOOK);
-            
-            if ($unscheduled !== false) {
-                // ASM_Logger::info('WordPress Cron: Price/Stock sync unscheduled', array(
-                //     'hook' => self::CRON_HOOK,
-                //     'timestamp' => $timestamp
-                // ));
-                return true;
-            }
-        }
-        
-        return false;
+        return wp_clear_scheduled_hook(self::CRON_HOOK) !== false;
     }
 
     /**

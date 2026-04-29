@@ -2,8 +2,7 @@
 /**
  * Cron Sync Class
  *
- * Handles automated product synchronization via WordPress Cron
- * Syncs all active brands at scheduled times
+ * Handles product synchronization for external cron runners and public endpoints.
  *
  * @package AutoSync_Product_Manager
  * @since 0.1.0
@@ -24,140 +23,15 @@ require_once ASM_PLUGIN_DIR . 'includes/class-email-notifier.php';
 class ASM_Cron_Sync {
 
     /**
-     * WordPress cron hook name
+     * Legacy WordPress cron hook name, kept only to clear old scheduled events.
      */
     const CRON_HOOK = 'asm_daily_sync_all_brands';
 
     /**
-     * WordPress cron schedule name (daily)
-     */
-    const CRON_SCHEDULE = 'daily';
-
-    /**
-     * Register WordPress cron event
-     * Only schedules if not already scheduled to avoid log spam
-     */
-    public static function register_cron() {
-        // Register custom daily schedule if it doesn't exist
-        self::register_cron_schedule();
-
-        // Check if cron is already scheduled
-        $timestamp = wp_next_scheduled(self::CRON_HOOK);
-        
-        if (!$timestamp) {
-            // Calculate next 2 AM timestamp
-            $next_run = self::get_next_2am_timestamp();
-            
-            // Schedule recurring event (daily at 2 AM)
-            $scheduled = wp_schedule_event(
-                $next_run,              // First run time
-                self::CRON_SCHEDULE,    // Schedule (daily)
-                self::CRON_HOOK         // Hook name
-            );
-            
-            if ($scheduled !== false) {
-                // ASM_Logger::info('WordPress Cron: Recurring event scheduled for daily sync at 2 AM', array(
-                //     'hook' => self::CRON_HOOK,
-                //     'schedule' => self::CRON_SCHEDULE,
-                //     'next_run' => date('Y-m-d H:i:s', $next_run),
-                //     'timestamp' => $next_run
-                // ));
-                return true;
-            } else {
-                // ASM_Logger::error('Failed to schedule WordPress cron event');
-                return false;
-            }
-        }
-        
-        // Cron already scheduled - return silently (no log spam)
-        return true;
-    }
-
-    /**
-     * Register custom cron schedule (daily at 2 AM)
-     */
-    private static function register_cron_schedule() {
-        // Add custom schedule if it doesn't exist
-        add_filter('cron_schedules', function($schedules) {
-            // Check if daily schedule already exists
-            if (!isset($schedules['daily'])) {
-                $schedules['daily'] = array(
-                    'interval' => DAY_IN_SECONDS, // 86400 seconds
-                    'display' => __('Once Daily', 'autosync-product-manager')
-                );
-            }
-            return $schedules;
-        });
-    }
-
-    /**
-     * Unregister WordPress cron event
+     * Clear legacy WordPress cron events.
      */
     public static function unregister_cron() {
-        // Get the timestamp of the next scheduled event
-        $timestamp = wp_next_scheduled(self::CRON_HOOK);
-        
-        if ($timestamp) {
-            // Unschedule the event
-            $unscheduled = wp_unschedule_event($timestamp, self::CRON_HOOK);
-            
-            if ($unscheduled !== false) {
-                // ASM_Logger::info('WordPress Cron: Recurring event unscheduled', array(
-                //     'hook' => self::CRON_HOOK,
-                //     'timestamp' => $timestamp
-                // ));
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
-    /**
-     * Get next 2 AM timestamp
-     * WordPress cron uses UTC timestamps, so we calculate 2 AM in site timezone and convert to UTC
-     */
-    private static function get_next_2am_timestamp() {
-        // Get current time in UTC (WordPress cron uses UTC)
-        $now_utc = time();
-        
-        // Get site timezone
-        $timezone_string = get_option('timezone_string');
-        if (empty($timezone_string)) {
-            $gmt_offset = get_option('gmt_offset');
-            $timezone_string = timezone_name_from_abbr('', $gmt_offset * 3600, false);
-        }
-        if (empty($timezone_string)) {
-            $timezone_string = 'UTC';
-        }
-        
-        // Create DateTime object for current time in site timezone
-        $site_tz = new DateTimeZone($timezone_string);
-        $utc_tz = new DateTimeZone('UTC');
-        $now_site = new DateTime('now', $site_tz);
-        
-        // Set to today at 2:00 AM in site timezone
-        $today_2am_site = clone $now_site;
-        $today_2am_site->setTime(2, 0, 0);
-        
-        // Convert to UTC timestamp
-        $today_2am_site->setTimezone($utc_tz);
-        $today_2am_utc = $today_2am_site->getTimestamp();
-        
-        // If it's already past 2 AM today in site timezone, schedule for tomorrow
-        $now_site_timestamp = $now_site->getTimestamp();
-        $today_2am_site_timestamp = (clone $now_site)->setTime(2, 0, 0)->getTimestamp();
-        
-        if ($now_site_timestamp >= $today_2am_site_timestamp) {
-            // Schedule for tomorrow 2 AM
-            $tomorrow_2am_site = clone $now_site;
-            $tomorrow_2am_site->modify('+1 day');
-            $tomorrow_2am_site->setTime(2, 0, 0);
-            $tomorrow_2am_site->setTimezone($utc_tz);
-            return $tomorrow_2am_site->getTimestamp();
-        }
-        
-        return $today_2am_utc;
+        return wp_clear_scheduled_hook(self::CRON_HOOK) !== false;
     }
 
     /**
@@ -241,8 +115,9 @@ class ASM_Cron_Sync {
     }
 
     /**
-     * Main cron handler - syncs all active brands
-     * This is called by WordPress Cron
+     * Sync all active brands.
+     *
+     * Called by the public HTTP endpoint and the direct external runner.
      */
     public static function sync_all_active_brands() {
         // Disable Query Monitor early to save memory
@@ -258,10 +133,8 @@ class ASM_Cron_Sync {
             }
         }
         
-        // ASM_Logger::info('=== WORDPRESS CRON SYNC STARTED ===', array(
+        // ASM_Logger::info('=== EXTERNAL PRODUCT SYNC STARTED ===', array(
         //     'time' => current_time('mysql'),
-        //     'hook' => self::CRON_HOOK,
-        //     'schedule' => self::CRON_SCHEDULE,
         //     'memory_limit' => ini_get('memory_limit'),
         //     'max_execution_time' => ini_get('max_execution_time'),
         //     'php_version' => PHP_VERSION,
@@ -425,11 +298,10 @@ class ASM_Cron_Sync {
         $duration = round(microtime(true) - $stats['start_time'], 2);
         $stats['duration'] = $duration;
 
-        // ASM_Logger::info('=== WORDPRESS CRON SYNC COMPLETED ===', array(
+        // ASM_Logger::info('=== EXTERNAL PRODUCT SYNC COMPLETED ===', array(
         //     'duration_seconds' => $duration,
         //     'tire_stats' => $stats['tires'],
         //     'wheel_stats' => $stats['wheels'],
-        //     'hook' => self::CRON_HOOK,
         //     'memory_peak' => size_format(memory_get_peak_usage(true))
         // ));
 
@@ -991,23 +863,6 @@ class ASM_Cron_Sync {
 
         return $stats;
     }
-
-    /**
-     * Get WordPress cron status information
-     */
-    public static function get_cron_status() {
-        $next_run = wp_next_scheduled(self::CRON_HOOK);
-        
-        return array(
-            'scheduled' => $next_run !== false,
-            'next_run' => $next_run ? date('Y-m-d H:i:s', $next_run) : null,
-            'next_run_timestamp' => $next_run,
-            'hook' => self::CRON_HOOK,
-            'schedule' => self::CRON_SCHEDULE,
-            'wp_cron_enabled' => !defined('DISABLE_WP_CRON') || !DISABLE_WP_CRON
-        );
-    }
-
 
     /**
      * Convert memory limit string to bytes
