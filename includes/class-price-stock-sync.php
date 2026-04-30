@@ -30,6 +30,21 @@ class ASM_Price_Stock_Sync {
     const CRON_HOOK = 'asm_price_stock_sync_cron';
 
     /**
+     * Map a PHP error-type bitmask value to a short readable label for log notes.
+     */
+    private static function php_error_type_label($type) {
+        $map = array(
+            E_ERROR             => 'E_ERROR',
+            E_PARSE             => 'E_PARSE',
+            E_CORE_ERROR        => 'E_CORE_ERROR',
+            E_COMPILE_ERROR     => 'E_COMPILE_ERROR',
+            E_USER_ERROR        => 'E_USER_ERROR',
+            E_RECOVERABLE_ERROR => 'E_RECOVERABLE_ERROR',
+        );
+        return isset($map[$type]) ? $map[$type] : ('TYPE_' . $type);
+    }
+
+    /**
      * Sync price and stock for all active brands
      * Only updates products where price_stock_hash has changed
      *
@@ -39,7 +54,9 @@ class ASM_Price_Stock_Sync {
         // Lock file overlap protection prevents multiple external requests from running
         // the same long price/stock sync at the same time.
         $lock_file = WP_CONTENT_DIR . '/autosync-price-stock.lock';
-        $lock_timeout = 45 * 60; // 45 min auto-expire for stale locks
+        // Stale-lock age is admin-configurable via ASM_Cron_Lock_Log option;
+        // falls back to 45 min when unset/empty/invalid.
+        $lock_timeout = ASM_Cron_Lock_Log::get_stale_minutes() * 60;
 
         $lock_state       = 'not_found';
         $action_taken     = 'created';
@@ -88,9 +105,31 @@ class ASM_Price_Stock_Sync {
             $note    = '';
 
             if (!$completed_normally) {
+                // Pull crash details from PHP's last-error buffer so the admin
+                // can see WHY the lock was kept on disk (typical cases: OOM,
+                // fatal in third-party code, max_execution_time exceeded).
+                // Filtered to fatal-class errors only — warnings/notices
+                // shouldn't be reported as the crash cause.
+                $crash_detail = '';
+                $last_error   = error_get_last();
+                $fatal_mask   = E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR;
+                if (is_array($last_error) && isset($last_error['type']) && ($last_error['type'] & $fatal_mask)) {
+                    $type_label = self::php_error_type_label((int) $last_error['type']);
+                    $message    = isset($last_error['message']) ? (string) $last_error['message'] : '';
+                    $file       = isset($last_error['file']) ? (string) $last_error['file'] : '';
+                    $line       = isset($last_error['line']) ? (int) $last_error['line'] : 0;
+                    $crash_detail = sprintf(
+                        ' Crash reason: [%s] %s in %s:%d',
+                        $type_label,
+                        $message,
+                        $file,
+                        $line
+                    );
+                }
+
                 $note = file_exists($lock_file)
-                    ? 'Lock kept on disk — sync did not complete normally (crash or fatal error).'
-                    : 'Lock file missing at shutdown after abnormal termination.';
+                    ? 'Lock kept on disk — sync did not complete normally (crash or fatal error).' . $crash_detail
+                    : 'Lock file missing at shutdown after abnormal termination.' . $crash_detail;
             } elseif (file_exists($lock_file)) {
                 $removed = (bool) @unlink($lock_file);
                 $note    = $removed
