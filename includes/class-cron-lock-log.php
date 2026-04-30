@@ -17,9 +17,61 @@ class ASM_Cron_Lock_Log {
 
     private static $table_name = 'asm_cron_lock_log';
 
+    /**
+     * Default stale-lock age (minutes) when the admin option is unset or invalid.
+     */
+    const DEFAULT_STALE_MINUTES = 45;
+
     public static function get_table_name() {
         global $wpdb;
         return $wpdb->prefix . self::$table_name;
+    }
+
+    /**
+     * Whether lock-log writes are enabled. Defaults to enabled to preserve
+     * existing behavior on sites that have not toggled the option.
+     */
+    public static function is_enabled() {
+        return (bool) get_option('asm_lock_log_enabled', 1);
+    }
+
+    public static function set_enabled($enabled) {
+        update_option('asm_lock_log_enabled', $enabled ? 1 : 0);
+    }
+
+    /**
+     * Stale-lock age in minutes. Falls back to DEFAULT_STALE_MINUTES when
+     * the option is empty, unset, non-numeric, or <= 0.
+     */
+    public static function get_stale_minutes() {
+        $value = get_option('asm_lock_stale_minutes', '');
+        if ($value === '' || !is_numeric($value) || (int) $value <= 0) {
+            return self::DEFAULT_STALE_MINUTES;
+        }
+        return (int) $value;
+    }
+
+    public static function set_stale_minutes($minutes) {
+        if ($minutes === '' || $minutes === null) {
+            delete_option('asm_lock_stale_minutes');
+            return;
+        }
+        update_option('asm_lock_stale_minutes', (int) $minutes);
+    }
+
+    /**
+     * Truncate the lock log table. Returns rows removed (or 0 on TRUNCATE).
+     */
+    public static function clear_all() {
+        global $wpdb;
+        $table = self::get_table_name();
+        // TRUNCATE is faster than DELETE and resets AUTO_INCREMENT.
+        // Falls back to DELETE if TRUNCATE is denied by privileges.
+        $result = $wpdb->query("TRUNCATE TABLE {$table}");
+        if ($result === false) {
+            $result = $wpdb->query("DELETE FROM {$table}");
+        }
+        return $result;
     }
 
     public static function create_table() {
@@ -58,6 +110,12 @@ class ASM_Cron_Lock_Log {
      */
     public static function log_start($lock_state, $action_taken, $process_outcome, $lock_age_minutes = null, $notes = '') {
         global $wpdb;
+
+        // Admin can disable logging without code changes; returning 0 makes
+        // log_end() a no-op for this run since it short-circuits on falsy id.
+        if (!self::is_enabled()) {
+            return 0;
+        }
 
         $table = self::get_table_name();
 

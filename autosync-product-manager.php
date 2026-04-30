@@ -129,6 +129,11 @@ class AutoSync_Product_Manager {
         add_action('wp_ajax_asm_get_brand_product_counts', array($this, 'ajax_get_brand_product_counts'));
         add_action('wp_ajax_asm_delete_extra_products', array($this, 'ajax_delete_extra_products'));
 
+        // Cron lock log admin controls
+        add_action('wp_ajax_asm_clear_lock_log', array($this, 'ajax_clear_lock_log'));
+        add_action('wp_ajax_asm_toggle_lock_log', array($this, 'ajax_toggle_lock_log'));
+        add_action('wp_ajax_asm_save_lock_stale_minutes', array($this, 'ajax_save_lock_stale_minutes'));
+
         // Hook into product deletion to clean up hashes
         add_action('before_delete_post', array($this, 'delete_product_hash_on_deletion'), 10, 1);
 
@@ -608,6 +613,85 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Test API connection
      */
+    /**
+     * AJAX: Clear all rows from the cron lock log table.
+     */
+    public function ajax_clear_lock_log() {
+        check_ajax_referer('asm_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+
+        require_once ASM_PLUGIN_DIR . 'includes/class-cron-lock-log.php';
+        $result = ASM_Cron_Lock_Log::clear_all();
+
+        if ($result === false) {
+            wp_send_json_error('Failed to clear lock log table.');
+        }
+
+        wp_send_json_success(array('message' => 'Lock log cleared.'));
+    }
+
+    /**
+     * AJAX: Enable or disable cron lock log writes.
+     */
+    public function ajax_toggle_lock_log() {
+        check_ajax_referer('asm_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+
+        require_once ASM_PLUGIN_DIR . 'includes/class-cron-lock-log.php';
+        $enabled = isset($_POST['enabled']) ? (string) $_POST['enabled'] : '';
+        // Accept '1'/'0', 'true'/'false', or boolean-ish — normalize to bool.
+        $enabled_bool = in_array(strtolower($enabled), array('1', 'true', 'on', 'yes'), true);
+        ASM_Cron_Lock_Log::set_enabled($enabled_bool);
+
+        wp_send_json_success(array(
+            'enabled' => $enabled_bool,
+            'message' => $enabled_bool ? 'Logging enabled.' : 'Logging disabled.',
+        ));
+    }
+
+    /**
+     * AJAX: Save stale-lock age (minutes). Empty string clears the option
+     * so the code falls back to the default.
+     */
+    public function ajax_save_lock_stale_minutes() {
+        check_ajax_referer('asm_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+
+        require_once ASM_PLUGIN_DIR . 'includes/class-cron-lock-log.php';
+        $raw = isset($_POST['minutes']) ? trim((string) $_POST['minutes']) : '';
+
+        if ($raw === '') {
+            ASM_Cron_Lock_Log::set_stale_minutes('');
+            wp_send_json_success(array(
+                'minutes'  => '',
+                'effective' => ASM_Cron_Lock_Log::get_stale_minutes(),
+                'message'  => 'Cleared — using default ' . ASM_Cron_Lock_Log::DEFAULT_STALE_MINUTES . ' minutes.',
+            ));
+        }
+
+        if (!is_numeric($raw) || (int) $raw <= 0) {
+            wp_send_json_error('Stale lock age must be a positive integer (minutes), or blank to use the default.');
+        }
+
+        $minutes = (int) $raw;
+        ASM_Cron_Lock_Log::set_stale_minutes($minutes);
+
+        wp_send_json_success(array(
+            'minutes'  => $minutes,
+            'effective' => $minutes,
+            'message'  => 'Saved. Stale lock age set to ' . $minutes . ' minutes.',
+        ));
+    }
+
     public function ajax_test_api() {
         check_ajax_referer('asm_nonce', 'nonce');
 
