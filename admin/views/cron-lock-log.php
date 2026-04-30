@@ -26,6 +26,11 @@ if ($table_exists) {
     $total = ASM_Cron_Lock_Log::get_total_count();
 }
 
+$logging_enabled    = ASM_Cron_Lock_Log::is_enabled();
+$stale_minutes_raw  = get_option('asm_lock_stale_minutes', '');
+$stale_minutes_eff  = ASM_Cron_Lock_Log::get_stale_minutes();
+$stale_default      = ASM_Cron_Lock_Log::DEFAULT_STALE_MINUTES;
+
 $lock_state_label = array(
     'not_found'    => 'Not Found',
     'found_active' => 'Found (Active)',
@@ -63,11 +68,55 @@ $outcome_label = array(
             </p>
         </div>
     <?php else: ?>
-        <div class="asm-card" style="background:#fff;border:1px solid #c3c4c7;padding:15px 20px;margin-top:15px;">
-            <strong>Total entries:</strong> <?php echo (int) $total; ?>
-            &nbsp;|&nbsp;
-            <strong>Showing:</strong> latest <?php echo count($rows); ?>
+        <div class="asm-card" style="background:#fff;border:1px solid #c3c4c7;padding:15px 20px;margin-top:15px;display:flex;flex-wrap:wrap;gap:24px;align-items:center;">
+            <div>
+                <strong>Total entries:</strong> <?php echo (int) $total; ?>
+                &nbsp;|&nbsp;
+                <strong>Showing:</strong> latest <?php echo count($rows); ?>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;">
+                <label for="asm-lock-log-toggle" style="font-weight:600;">Logging:</label>
+                <input
+                    type="checkbox"
+                    id="asm-lock-log-toggle"
+                    <?php checked($logging_enabled, true); ?>
+                />
+                <span id="asm-lock-log-toggle-label" style="color:<?php echo $logging_enabled ? '#1d7a3a' : '#b32d2e'; ?>;font-weight:600;">
+                    <?php echo $logging_enabled ? 'Enabled' : 'Disabled'; ?>
+                </span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;">
+                <label for="asm-lock-stale-minutes" style="font-weight:600;" title="Lock files older than this are treated as stale and removed before the next sync proceeds.">
+                    Stale lock age (min):
+                </label>
+                <input
+                    type="number"
+                    id="asm-lock-stale-minutes"
+                    min="1"
+                    step="1"
+                    value="<?php echo esc_attr($stale_minutes_raw); ?>"
+                    placeholder="<?php echo (int) $stale_default; ?> (default)"
+                    style="width:120px;"
+                />
+                <button type="button" class="button button-secondary" id="asm-lock-stale-save">Save</button>
+                <span class="description" style="color:#646970;">
+                    Currently effective: <strong><?php echo (int) $stale_minutes_eff; ?> min</strong>
+                    <?php if ($stale_minutes_raw === '' || !is_numeric($stale_minutes_raw)): ?>
+                        (default fallback)
+                    <?php endif; ?>
+                </span>
+            </div>
+
+            <div style="margin-left:auto;">
+                <button type="button" class="button button-secondary" id="asm-lock-log-clear" style="color:#b32d2e;border-color:#b32d2e;">
+                    Clear All Logs
+                </button>
+            </div>
         </div>
+
+        <div id="asm-lock-log-status" style="margin-top:10px;"></div>
 
         <table class="widefat striped" style="margin-top:15px;table-layout:auto;width:100%;">
             <thead>
@@ -143,5 +192,112 @@ $outcome_label = array(
                 <?php endif; ?>
             </tbody>
         </table>
+
+        <script>
+        // Deferred to DOM-ready: asmData is localized to the asm-admin script,
+        // which is enqueued in_footer = true. An inline IIFE here would run
+        // during body parse — before the footer — and silently early-return
+        // because window.asmData is not yet defined, leaving every button
+        // un-bound. jQuery(fn) waits for DOMContentLoaded, by which point
+        // the footer (and asmData) has been parsed.
+        jQuery(function ($) {
+            if (!window.asmData || !window.asmData.ajax_url) {
+                if (window.console && console.warn) {
+                    console.warn('ASM lock log: asmData not available; admin.js may have failed to enqueue.');
+                }
+                return;
+            }
+
+            var $status = $('#asm-lock-log-status');
+
+            function showStatus(message, isError) {
+                $status.html(
+                    '<div class="notice ' + (isError ? 'notice-error' : 'notice-success') + ' inline" style="padding:8px 12px;margin:0;">' +
+                    '<p style="margin:0;">' + $('<div>').text(message).html() + '</p>' +
+                    '</div>'
+                );
+            }
+
+            // Toggle logging on/off
+            $('#asm-lock-log-toggle').on('change', function () {
+                var enabled = this.checked ? '1' : '0';
+                var $cb = $(this);
+                $cb.prop('disabled', true);
+
+                $.post(asmData.ajax_url, {
+                    action:  'asm_toggle_lock_log',
+                    nonce:   asmData.nonce,
+                    enabled: enabled
+                }).done(function (resp) {
+                    if (resp && resp.success) {
+                        var on = !!resp.data.enabled;
+                        $('#asm-lock-log-toggle-label')
+                            .text(on ? 'Enabled' : 'Disabled')
+                            .css('color', on ? '#1d7a3a' : '#b32d2e');
+                        showStatus(resp.data.message || 'Updated.', false);
+                    } else {
+                        // Revert visual state on failure
+                        $cb.prop('checked', !$cb.prop('checked'));
+                        showStatus((resp && resp.data) ? resp.data : 'Toggle failed.', true);
+                    }
+                }).fail(function () {
+                    $cb.prop('checked', !$cb.prop('checked'));
+                    showStatus('Network error while toggling logging.', true);
+                }).always(function () {
+                    $cb.prop('disabled', false);
+                });
+            });
+
+            // Save stale lock age
+            $('#asm-lock-stale-save').on('click', function () {
+                var $btn = $(this);
+                var minutes = $('#asm-lock-stale-minutes').val();
+                $btn.prop('disabled', true).text('Saving…');
+
+                $.post(asmData.ajax_url, {
+                    action:  'asm_save_lock_stale_minutes',
+                    nonce:   asmData.nonce,
+                    minutes: minutes
+                }).done(function (resp) {
+                    if (resp && resp.success) {
+                        showStatus(resp.data.message || 'Saved.', false);
+                        // Reload so the "Currently effective" label re-renders correctly.
+                        setTimeout(function () { window.location.reload(); }, 600);
+                    } else {
+                        showStatus((resp && resp.data) ? resp.data : 'Save failed.', true);
+                    }
+                }).fail(function () {
+                    showStatus('Network error while saving stale lock age.', true);
+                }).always(function () {
+                    $btn.prop('disabled', false).text('Save');
+                });
+            });
+
+            // Clear all logs
+            $('#asm-lock-log-clear').on('click', function () {
+                if (!window.confirm('Delete ALL cron lock log entries? This cannot be undone.')) {
+                    return;
+                }
+                var $btn = $(this);
+                $btn.prop('disabled', true).text('Clearing…');
+
+                $.post(asmData.ajax_url, {
+                    action: 'asm_clear_lock_log',
+                    nonce:  asmData.nonce
+                }).done(function (resp) {
+                    if (resp && resp.success) {
+                        showStatus(resp.data.message || 'Cleared.', false);
+                        setTimeout(function () { window.location.reload(); }, 600);
+                    } else {
+                        showStatus((resp && resp.data) ? resp.data : 'Clear failed.', true);
+                        $btn.prop('disabled', false).text('Clear All Logs');
+                    }
+                }).fail(function () {
+                    showStatus('Network error while clearing logs.', true);
+                    $btn.prop('disabled', false).text('Clear All Logs');
+                });
+            });
+        });
+        </script>
     <?php endif; ?>
 </div>
