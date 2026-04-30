@@ -75,30 +75,27 @@ class ASM_Price_Stock_Sync {
             'Lock file created; cron proceeding as new process.'
         );
 
-        register_shutdown_function(function () use ($lock_file, $log_id, $lock_timeout) {
-            // Cooldown semantics: keep the lock on disk until BOTH conditions hold —
-            // (1) the sync process has finished (we're inside the shutdown handler), AND
-            // (2) at least $lock_timeout (45 min) has elapsed since the lock was created.
-            // If the process finishes faster than 45 min, leave the lock so the next
-            // cron tick within that window is skipped. The lock will be cleared by
-            // a later cron tick once it crosses the 45-min threshold.
+        // Crash-detection contract: the lock is removed at shutdown ONLY when the
+        // sync reached a clean exit point and set $completed_normally = true.
+        // If a fatal/uncaught exception aborts the run before that, or the process
+        // is hard-killed (SIGKILL/OOM/worker recycle) and this handler never fires,
+        // the lock stays on disk so the next cron tick can detect it as a stale
+        // lock left behind by a crashed run.
+        $completed_normally = false;
+
+        register_shutdown_function(function () use ($lock_file, $log_id, &$completed_normally) {
             $removed = false;
             $note    = '';
 
-            if (file_exists($lock_file)) {
-                $age = time() - (int) filemtime($lock_file);
-                if ($age >= $lock_timeout) {
-                    $removed = (bool) @unlink($lock_file);
-                    $note    = $removed
-                        ? 'Lock file removed at shutdown (cooldown elapsed).'
-                        : 'Lock file removal failed at shutdown.';
-                } else {
-                    $remaining = max(0, $lock_timeout - $age);
-                    $note      = sprintf(
-                        'Process complete; lock kept on disk to enforce 45-min cooldown (%.1f min remaining).',
-                        $remaining / 60
-                    );
-                }
+            if (!$completed_normally) {
+                $note = file_exists($lock_file)
+                    ? 'Lock kept on disk — sync did not complete normally (crash or fatal error).'
+                    : 'Lock file missing at shutdown after abnormal termination.';
+            } elseif (file_exists($lock_file)) {
+                $removed = (bool) @unlink($lock_file);
+                $note    = $removed
+                    ? 'Lock file removed at shutdown (sync completed).'
+                    : 'Lock file removal failed at shutdown.';
             } else {
                 $note = 'Lock file already gone at shutdown.';
             }
@@ -112,6 +109,7 @@ class ASM_Price_Stock_Sync {
         
         if ($hash_count == 0) {
             // ASM_Logger::info('Price/Stock sync skipped - hash table is empty. Please run full product sync first.');
+            $completed_normally = true;
             return array(
                 'start_time' => microtime(true),
                 'duration' => 0,
@@ -135,6 +133,7 @@ class ASM_Price_Stock_Sync {
         $api_key = get_option('asm_api_key', '');
         if (empty($api_key)) {
             // ASM_Logger::info('Price/Stock sync skipped - API key not configured.');
+            $completed_normally = true;
             return array(
                 'start_time' => microtime(true),
                 'duration' => 0,
@@ -224,6 +223,7 @@ class ASM_Price_Stock_Sync {
         // Save sync status
         self::save_sync_status($stats);
 
+        $completed_normally = true;
         return $stats;
     }
 
