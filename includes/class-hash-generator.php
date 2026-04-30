@@ -106,13 +106,13 @@ class ASM_Hash_Generator {
 
         // Get all product meta (excluding image URL fields - we use _image_urls instead)
         $meta_data = get_post_meta($product->get_id());
-        
+
         foreach ($meta_data as $key => $value) {
             // Skip WordPress attachment IDs
             if (in_array($key, array('_thumbnail_id', '_product_image_gallery'))) {
                 continue;
             }
-            
+
             // Skip image URL meta keys (we use _image_urls instead)
             if ($key === 'feature_img_link' || strpos($key, 'galleryimage') === 0) {
                 continue;
@@ -121,8 +121,8 @@ class ASM_Hash_Generator {
             // Skip WooCommerce internal meta keys that don't affect product data
             if (strpos($key, '_') === 0 && !in_array($key, array('_sku', '_weight', '_regular_price', '_price'))) {
                 // Include only relevant custom meta
-                if (strpos($key, '_product_attributes') === 0 || 
-                    strpos($key, '_') !== 0 || 
+                if (strpos($key, '_product_attributes') === 0 ||
+                    strpos($key, '_') !== 0 ||
                     in_array($key, array('_sku', '_weight', '_regular_price', '_price'))) {
                     // Include this meta
                 } else {
@@ -131,9 +131,11 @@ class ASM_Hash_Generator {
                 }
             }
 
-            // Get single value (not array)
-            $meta_value = get_post_meta($product->get_id(), $key, true);
-            
+            // get_post_meta($id) returns array of arrays — first element matches the
+            // single-value form get_post_meta($id, $key, true) would return, without
+            // a second cache/DB hit per key.
+            $meta_value = is_array($value) && isset($value[0]) ? $value[0] : $value;
+
             // Skip empty values
             if ($meta_value === '' || $meta_value === null) {
                 continue;

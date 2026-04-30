@@ -180,8 +180,15 @@ class ASM_Cron_Sync {
             // ));
         }
 
+        // Suspend WordPress object-cache additions for the duration of the sync.
+        // The cron path performs ~67K product writes; without this, every get_option/
+        // get_post_meta/get_term_by call populates $wp_object_cache and never evicts,
+        // driving RAM up linearly. Re-enabled in the finally block below.
+        wp_suspend_cache_addition(true);
+        try {
+
         $api_client = new ASM_API_Client();
-        
+
         // Check if brands exist, fetch if they don't
         if (!self::ensure_brands_exist($api_client)) {
             // ASM_Logger::warning('Failed to fetch brands - sync may have no brands to process');
@@ -391,6 +398,10 @@ class ASM_Cron_Sync {
         }
 
         return $stats;
+
+        } finally {
+            wp_suspend_cache_addition(false);
+        }
     }
 
     /**
