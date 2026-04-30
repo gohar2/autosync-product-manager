@@ -3,7 +3,7 @@
  * Plugin Name: AutoSync Product Manager
  * Plugin URI: https://sdtireandwheel.com
  * Description: Simple product synchronization from AutoSync Studio API using external cron endpoints and extra product deletion functionality.
- * Version: 6.4
+ * Version: 6.5
  * Author: Syed
  * Author URI: https://sdtireandwheel.com
  * Requires at least: 5.8
@@ -238,7 +238,10 @@ class AutoSync_Product_Manager {
 
         // Set execution limits
         @set_time_limit(0);
-        @ini_set('memory_limit', '512M');
+        // Raised from 512M to 1024M for parity with the product-import endpoint
+        // and to leave headroom while wp_suspend_cache_addition() (in
+        // ASM_Price_Stock_Sync::sync_all_brands) suppresses cache growth.
+        @ini_set('memory_limit', '1024M');
         @ini_set('max_execution_time', '0');
         @ini_set('max_input_time', '0');
 

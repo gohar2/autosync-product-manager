@@ -142,6 +142,14 @@ class ASM_Price_Stock_Sync {
             ASM_Cron_Lock_Log::log_end($log_id, $removed, $note);
         });
 
+        // Suspend WordPress object-cache additions for the duration of the
+        // price/stock sync. This path lazily loads taxonomy + post-meta for
+        // every product touched, which without suspension fills $wp_object_cache
+        // until PHP hits memory_limit and crashes inside wp-includes/taxonomy.php
+        // (observed E_ERROR at 512M ceiling). Re-enabled in the finally block.
+        wp_suspend_cache_addition(true);
+        try {
+
         // Check if hash table has entries - price/stock sync requires full product sync first
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
         $hash_count = ASM_Hash_Manager::get_total_count();
@@ -264,6 +272,10 @@ class ASM_Price_Stock_Sync {
 
         $completed_normally = true;
         return $stats;
+
+        } finally {
+            wp_suspend_cache_addition(false);
+        }
     }
 
     /**
