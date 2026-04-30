@@ -194,8 +194,17 @@ $outcome_label = array(
         </table>
 
         <script>
-        (function ($) {
+        // Deferred to DOM-ready: asmData is localized to the asm-admin script,
+        // which is enqueued in_footer = true. An inline IIFE here would run
+        // during body parse — before the footer — and silently early-return
+        // because window.asmData is not yet defined, leaving every button
+        // un-bound. jQuery(fn) waits for DOMContentLoaded, by which point
+        // the footer (and asmData) has been parsed.
+        jQuery(function ($) {
             if (!window.asmData || !window.asmData.ajax_url) {
+                if (window.console && console.warn) {
+                    console.warn('ASM lock log: asmData not available; admin.js may have failed to enqueue.');
+                }
                 return;
             }
 
@@ -288,7 +297,7 @@ $outcome_label = array(
                     $btn.prop('disabled', false).text('Clear All Logs');
                 });
             });
-        })(jQuery);
+        });
         </script>
     <?php endif; ?>
 </div>
