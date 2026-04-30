@@ -3,7 +3,7 @@
  * Plugin Name: AutoSync Product Manager
  * Plugin URI: https://sdtireandwheel.com
  * Description: Simple product synchronization from AutoSync Studio API using external cron endpoints and extra product deletion functionality.
- * Version: 6.2
+ * Version: 6.3
  * Author: Syed
  * Author URI: https://sdtireandwheel.com
  * Requires at least: 5.8
