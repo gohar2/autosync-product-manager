@@ -356,24 +356,30 @@ class ASM_Hash_Manager {
      */
     public static function save_hash($sku, $hash, $product_id = null, $product_type = null, $brand = null, $price_stock_hash = null) {
         global $wpdb;
-        
-        if (empty($sku) || empty($hash)) {
+
+        if (empty($sku)) {
             return false;
         }
 
         $table_name = self::get_table_name();
-        
+
         // Check if hash exists for this SKU
         $existing = self::get_hash_record($sku);
-        
+
         $update_data = array(
-            'hash' => $hash,
             'product_id' => $product_id,
             'product_type' => $product_type,
             'brand' => $brand,
             'last_updated' => current_time('mysql')
         );
-        $update_format = array('%s', '%d', '%s', '%s', '%s');
+        $update_format = array('%d', '%s', '%s', '%s');
+
+        // Only overwrite the full hash if a real one was provided.
+        // This lets price/stock sync seed a row without clobbering a prior full hash.
+        if (!empty($hash)) {
+            $update_data['hash'] = $hash;
+            $update_format[] = '%s';
+        }
         
         // Add price_stock_hash if provided
         if ($price_stock_hash !== null) {
@@ -687,12 +693,14 @@ class ASM_Hash_Manager {
                 $product_type = isset($hash_data['product_type']) ? $hash_data['product_type'] : null;
                 $brand = isset($hash_data['brand']) ? $hash_data['brand'] : null;
                 
-                if (empty($sku) || empty($hash)) {
+                if (empty($sku)) {
                     continue;
                 }
 
+                // Allow empty full hash so price/stock sync can seed a row;
+                // ON DUPLICATE KEY clause below preserves any existing real hash.
                 $sku_escaped = esc_sql($sku);
-                $hash_escaped = esc_sql($hash);
+                $hash_escaped = esc_sql($hash !== null ? $hash : '');
                 $price_stock_hash_escaped = $price_stock_hash ? "'" . esc_sql($price_stock_hash) . "'" : 'NULL';
                 $product_id_escaped = $product_id ? intval($product_id) : 'NULL';
                 $product_type_escaped = $product_type ? "'" . esc_sql($product_type) . "'" : 'NULL';
@@ -710,12 +718,12 @@ class ASM_Hash_Manager {
             $values_sql = implode(',', $values);
             $sql = "INSERT INTO {$table_name} (sku, hash, price_stock_hash, product_id, product_type, brand, created_at, last_updated) 
                     VALUES {$values_sql}
-                    ON DUPLICATE KEY UPDATE 
-                    hash = VALUES(hash),
-                    price_stock_hash = VALUES(price_stock_hash),
-                    product_id = VALUES(product_id),
-                    product_type = VALUES(product_type),
-                    brand = VALUES(brand),
+                    ON DUPLICATE KEY UPDATE
+                    hash = COALESCE(NULLIF(VALUES(hash), ''), hash),
+                    price_stock_hash = COALESCE(VALUES(price_stock_hash), price_stock_hash),
+                    product_id = COALESCE(VALUES(product_id), product_id),
+                    product_type = COALESCE(VALUES(product_type), product_type),
+                    brand = COALESCE(VALUES(brand), brand),
                     last_updated = VALUES(last_updated)";
 
             $result = $wpdb->query($sql);

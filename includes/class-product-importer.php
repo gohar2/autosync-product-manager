@@ -388,7 +388,9 @@ class ASM_Product_Importer {
         // Core identifiers
         update_post_meta($product_id, 'p_id_api', $api_data->Id);
         update_post_meta($product_id, '_sku', $api_data->Pn);
-        update_post_meta($product_id, 'StyleId', 'wgp-' . $api_data->StyleId);
+        if (isset($api_data->StyleId) && !empty($api_data->StyleId)) {
+    update_post_meta($product_id, 'StyleId', 'wgp-' . $api_data->StyleId);
+}
 
         // Common product fields (Brand, BrandId, Weight)
         update_post_meta($product_id, 'Brand', $api_data->Brand);

@@ -1,11 +1,12 @@
 <?php
+
 /**
  * Plugin Name: AutoSync Product Manager
- * Plugin URI: https://sdtireandwheel.com
+ * Plugin URI: https://wordpress-1649893-6713087.cloudwaysapps.com
  * Description: Simple product synchronization from AutoSync Studio API using external cron endpoints and extra product deletion functionality.
- * Version: 6.4
+ * Version: 6.6
  * Author: Syed
- * Author URI: https://sdtireandwheel.com
+ * Author URI: https://wordpress-1649893-6713087.cloudwaysapps.com
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * License: GPL v2 or later
@@ -25,7 +26,8 @@ define('ASM_PLUGIN_URL', plugin_dir_url(__FILE__));
 /**
  * Main Plugin Class
  */
-class AutoSync_Product_Manager {
+class AutoSync_Product_Manager
+{
 
     /**
      * Singleton instance
@@ -45,7 +47,8 @@ class AutoSync_Product_Manager {
     /**
      * Get singleton instance
      */
-    public static function instance() {
+    public static function instance()
+    {
         if (null === self::$instance) {
             self::$instance = new self();
         }
@@ -55,7 +58,8 @@ class AutoSync_Product_Manager {
     /**
      * Constructor
      */
-    private function __construct() {
+    private function __construct()
+    {
         $this->load_dependencies();
         $this->init_hooks();
     }
@@ -63,7 +67,8 @@ class AutoSync_Product_Manager {
     /**
      * Load required files
      */
-    private function load_dependencies() {
+    private function load_dependencies()
+    {
         require_once ASM_PLUGIN_DIR . 'includes/class-api-client.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-product-importer.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-logger.php';
@@ -82,7 +87,8 @@ class AutoSync_Product_Manager {
     /**
      * Initialize WordPress hooks
      */
-    private function init_hooks() {
+    private function init_hooks()
+    {
         // Admin menu
         add_action('admin_menu', array($this, 'add_admin_menu'));
 
@@ -91,7 +97,7 @@ class AutoSync_Product_Manager {
 
         // Public cron endpoint (accessible via HTTP)
         add_action('init', array($this, 'handle_public_cron_endpoint'));
-        
+
         // Register WooCommerce email class (after WooCommerce is loaded)
         // Use plugins_loaded with priority to ensure WooCommerce is available
         add_action('plugins_loaded', array($this, 'load_wc_email_class'), 20);
@@ -115,7 +121,7 @@ class AutoSync_Product_Manager {
         add_action('wp_ajax_asm_bulk_delete_duplicates_batch', array($this, 'ajax_bulk_delete_duplicates_batch'));
         add_action('wp_ajax_asm_sync_inventory_quantity', array($this, 'ajax_sync_inventory_quantity'));
         add_action('wp_ajax_asm_sync_inventory_quantity_batch', array($this, 'ajax_sync_inventory_quantity_batch'));
-        
+
         // Brand management AJAX handlers
         add_action('wp_ajax_asm_fetch_brands', array($this, 'ajax_fetch_brands'));
         add_action('wp_ajax_asm_update_brand_status', array($this, 'ajax_update_brand_status'));
@@ -142,7 +148,7 @@ class AutoSync_Product_Manager {
 
         // Remove any WP-Cron events scheduled by older plugin versions.
         add_action('init', array($this, 'disable_internal_cron_events'), 1);
-        
+
         // Handle activation redirect
         add_action('admin_init', array($this, 'handle_activation_redirect'));
     }
@@ -150,7 +156,8 @@ class AutoSync_Product_Manager {
     /**
      * Add admin menu
      */
-    public function add_admin_menu() {
+    public function add_admin_menu()
+    {
         add_menu_page(
             'AutoSync Manager',
             'AutoSync Manager',
@@ -185,14 +192,15 @@ class AutoSync_Product_Manager {
     /**
      * Enqueue admin assets
      */
-    public function enqueue_admin_assets($hook) {
+    public function enqueue_admin_assets($hook)
+    {
         // Load assets for main settings page and hash management page
         $allowed_hooks = array(
             'toplevel_page_autosync-manager',
             'autosync-manager_page_autosync-hash-management',
             'autosync-manager_page_autosync-brand-management'
         );
-        
+
         if (!in_array($hook, $allowed_hooks)) {
             return;
         }
@@ -225,7 +233,8 @@ class AutoSync_Product_Manager {
     /**
      * Handle price/stock sync endpoint
      */
-    private function handle_price_stock_sync_endpoint() {
+    private function handle_price_stock_sync_endpoint()
+    {
         // Check secret key
         $secret_key = isset($_GET['key']) ? trim($_GET['key']) : '';
         $expected_key = 'your-very-secure-secret-key-here'; // CHANGE THIS!
@@ -270,11 +279,10 @@ class AutoSync_Product_Manager {
                 'timestamp' => date('Y-m-d H:i:s')
             ), JSON_PRETTY_PRINT);
             exit(0);
-
         } catch (Exception $e) {
             $error_msg = 'ASM Price/Stock Sync Endpoint: Error - ' . $e->getMessage();
             error_log($error_msg);
-            
+
             // Log full trace only in debug mode
             if (defined('WP_DEBUG') && WP_DEBUG) {
                 error_log("Trace: " . $e->getTraceAsString());
@@ -282,22 +290,22 @@ class AutoSync_Product_Manager {
 
             http_response_code(500);
             header('Content-Type: application/json');
-            
+
             $response = array(
                 'success' => false,
-                'error' => defined('WP_DEBUG') && WP_DEBUG 
-                    ? $e->getMessage() 
+                'error' => defined('WP_DEBUG') && WP_DEBUG
+                    ? $e->getMessage()
                     : 'An error occurred during price/stock sync. Please check logs.',
                 'timestamp' => date('Y-m-d H:i:s')
             );
-            
+
             // Include trace only in debug mode
             if (defined('WP_DEBUG') && WP_DEBUG) {
                 $response['trace'] = $e->getTraceAsString();
                 $response['file'] = $e->getFile();
                 $response['line'] = $e->getLine();
             }
-            
+
             echo json_encode($response, JSON_PRETTY_PRINT);
             exit(1);
         }
@@ -313,13 +321,14 @@ class AutoSync_Product_Manager {
      * and runs the sync in the background to avoid 504 Gateway Timeout errors.
      * Use CLI method (cron/cron-runner.php) for best results.
      */
-    public function handle_public_cron_endpoint() {
+    public function handle_public_cron_endpoint()
+    {
         // Check for price/stock sync endpoint
         if (isset($_GET['asm_price_stock_sync']) && $_GET['asm_price_stock_sync'] === '1') {
             $this->handle_price_stock_sync_endpoint();
             return;
         }
-        
+
         // Only process if the query parameter is set
         if (!isset($_GET['asm_cron_run']) || $_GET['asm_cron_run'] !== '1') {
             return;
@@ -337,16 +346,16 @@ class AutoSync_Product_Manager {
 
         // Check if async mode is requested (default for large syncs)
         $async = !isset($_GET['sync']) || $_GET['sync'] !== 'wait';
-        
+
         if ($async) {
             // Return immediately and run in background to avoid 504 timeout
             // This is recommended for large syncs (80,000+ products)
-            
+
             // Send immediate response
             header('Content-Type: application/json');
             header('Connection: close');
             ignore_user_abort(true);
-            
+
             $response = array(
                 'success' => true,
                 'message' => 'Sync started in background. This may take several hours for large product counts.',
@@ -354,9 +363,9 @@ class AutoSync_Product_Manager {
                 'note' => 'Check WooCommerce logs or sync status in admin panel for progress.',
                 'recommendation' => 'For best results with 80,000+ products, use CLI method: php cron/cron-runner.php'
             );
-            
+
             echo json_encode($response, JSON_PRETTY_PRINT);
-            
+
             // Flush output and close connection
             if (function_exists('fastcgi_finish_request')) {
                 fastcgi_finish_request();
@@ -367,25 +376,25 @@ class AutoSync_Product_Manager {
                 }
                 flush();
             }
-            
+
             // Now run the sync in background
             $this->run_background_sync();
             exit(0);
         } else {
             // Synchronous mode (for testing small syncs only)
             // WARNING: This will timeout on large syncs!
-            
+
             // Set execution limits
             @set_time_limit(0);
             @ini_set('memory_limit', '1024M');
             @ini_set('max_execution_time', '0');
             @ini_set('max_input_time', '0');
-            
+
             // Disable WordPress cron during execution
             if (!defined('DISABLE_WP_CRON')) {
                 define('DISABLE_WP_CRON', true);
             }
-            
+
             // Load required classes
             if (!class_exists('ASM_Cron_Sync')) {
                 require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
@@ -396,31 +405,31 @@ class AutoSync_Product_Manager {
                 require_once ASM_PLUGIN_DIR . 'includes/class-sync-status-manager.php';
                 require_once ASM_PLUGIN_DIR . 'includes/class-product-deleter.php';
             }
-            
+
             // Log start
             error_log('ASM Public Cron Endpoint: Starting sync at ' . date('Y-m-d H:i:s'));
-            
+
             $start_time_overall = microtime(true);
-            
+
             // Run sync
             try {
                 $stats = ASM_Cron_Sync::sync_all_active_brands();
                 $end_time_overall = microtime(true);
                 $duration_overall = round($end_time_overall - $start_time_overall, 2);
-                
+
                 // Add duration to stats for email
                 $stats['duration'] = $duration_overall;
-                
+
                 // Send email notification
                 ASM_Email_Notifier::send_sync_email('all', $stats);
-                
+
                 // Send Slack notification
                 try {
                     ASM_Slack_Notifier::send_sync_notification('all', $stats);
                 } catch (Exception $e) {
                     error_log('ASM Public Cron: Exception sending Slack notification: ' . $e->getMessage());
                 }
-                
+
                 // Output results as JSON
                 header('Content-Type: application/json');
                 echo json_encode(array(
@@ -430,58 +439,58 @@ class AutoSync_Product_Manager {
                     'duration_seconds' => $duration_overall,
                     'stats' => $stats
                 ), JSON_PRETTY_PRINT);
-                
+
                 error_log('ASM Public Cron Endpoint: Sync completed successfully');
                 exit(0);
-                
             } catch (Exception $e) {
                 $error_msg = 'ASM Public Cron Endpoint: Error - ' . $e->getMessage();
                 error_log($error_msg);
-                
+
                 // Log full trace only in debug mode
                 if (defined('WP_DEBUG') && WP_DEBUG) {
                     error_log("Trace: " . $e->getTraceAsString());
                 }
-                
+
                 http_response_code(500);
                 header('Content-Type: application/json');
-                
+
                 $response = array(
                     'success' => false,
-                    'error' => defined('WP_DEBUG') && WP_DEBUG 
-                        ? $e->getMessage() 
+                    'error' => defined('WP_DEBUG') && WP_DEBUG
+                        ? $e->getMessage()
                         : 'An error occurred during sync. Please check logs.',
                     'timestamp' => date('Y-m-d H:i:s')
                 );
-                
+
                 // Include trace only in debug mode
                 if (defined('WP_DEBUG') && WP_DEBUG) {
                     $response['trace'] = $e->getTraceAsString();
                     $response['file'] = $e->getFile();
                     $response['line'] = $e->getLine();
                 }
-                
+
                 echo json_encode($response, JSON_PRETTY_PRINT);
                 exit(1);
             }
         }
     }
-    
+
     /**
      * Run sync in background (called after HTTP response is sent)
      */
-    private function run_background_sync() {
+    private function run_background_sync()
+    {
         // Set execution limits for large syncs
         @set_time_limit(0);
         @ini_set('memory_limit', '1024M');
         @ini_set('max_execution_time', '0');
         @ini_set('max_input_time', '0');
-        
+
         // Disable WordPress cron during execution
         if (!defined('DISABLE_WP_CRON')) {
             define('DISABLE_WP_CRON', true);
         }
-        
+
         // Load required classes if not already loaded
         if (!class_exists('ASM_Cron_Sync')) {
             require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
@@ -492,28 +501,27 @@ class AutoSync_Product_Manager {
             require_once ASM_PLUGIN_DIR . 'includes/class-sync-status-manager.php';
             require_once ASM_PLUGIN_DIR . 'includes/class-product-deleter.php';
         }
-        
+
         // Log start
         error_log('ASM Public Cron Endpoint (Background): Starting sync at ' . date('Y-m-d H:i:s'));
-        
+
         $start_time_overall = microtime(true);
-        
+
         // Run sync
         try {
             $stats = ASM_Cron_Sync::sync_all_active_brands();
             $end_time_overall = microtime(true);
             $duration_overall = round($end_time_overall - $start_time_overall, 2);
-            
+
             // Add duration to stats for email
             $stats['duration'] = $duration_overall;
-            
+
             // Send email notification
             ASM_Email_Notifier::send_sync_email('all', $stats);
-            
+
             error_log('ASM Public Cron Endpoint (Background): Sync completed successfully');
             error_log('ASM Public Cron Endpoint (Background): Duration: ' . $duration_overall . ' seconds');
             error_log('ASM Public Cron Endpoint (Background): Stats: ' . json_encode($stats));
-            
         } catch (Exception $e) {
             $error_msg = 'ASM Public Cron Endpoint (Background): Error - ' . $e->getMessage();
             error_log($error_msg);
@@ -527,7 +535,8 @@ class AutoSync_Product_Manager {
     /**
      * Register plugin settings
      */
-    public function register_settings() {
+    public function register_settings()
+    {
         // API settings with explicit sanitize callbacks
         register_setting('asm_settings', 'asm_api_key', array(
             'sanitize_callback' => array($this, 'sanitize_api_key')
@@ -563,7 +572,8 @@ class AutoSync_Product_Manager {
      * @param string $value The API key value to sanitize
      * @return string Sanitized API key
      */
-    public function sanitize_api_key($value) {
+    public function sanitize_api_key($value)
+    {
         return sanitize_text_field($value);
     }
 
@@ -573,7 +583,8 @@ class AutoSync_Product_Manager {
      * @param string $value The API URL value to sanitize
      * @return string Sanitized API URL
      */
-    public function sanitize_api_url($value) {
+    public function sanitize_api_url($value)
+    {
         $url = esc_url_raw($value);
         // Validate it's a proper URL
         if (!empty($url) && !filter_var($url, FILTER_VALIDATE_URL)) {
@@ -589,7 +600,8 @@ class AutoSync_Product_Manager {
      * @param string $value The webhook URL value to sanitize
      * @return string Sanitized webhook URL
      */
-    public function sanitize_webhook_url($value) {
+    public function sanitize_webhook_url($value)
+    {
         $url = esc_url_raw($value);
         // Validate it's a proper URL (webhooks should be HTTPS)
         if (!empty($url) && !filter_var($url, FILTER_VALIDATE_URL)) {
@@ -602,7 +614,8 @@ class AutoSync_Product_Manager {
     /**
      * Render settings page
      */
-    public function render_settings_page() {
+    public function render_settings_page()
+    {
         if (!current_user_can('manage_options')) {
             return;
         }
@@ -616,7 +629,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Clear all rows from the cron lock log table.
      */
-    public function ajax_clear_lock_log() {
+    public function ajax_clear_lock_log()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -636,7 +650,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Enable or disable cron lock log writes.
      */
-    public function ajax_toggle_lock_log() {
+    public function ajax_toggle_lock_log()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -659,7 +674,8 @@ class AutoSync_Product_Manager {
      * AJAX: Save stale-lock age (minutes). Empty string clears the option
      * so the code falls back to the default.
      */
-    public function ajax_save_lock_stale_minutes() {
+    public function ajax_save_lock_stale_minutes()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -692,7 +708,8 @@ class AutoSync_Product_Manager {
         ));
     }
 
-    public function ajax_test_api() {
+    public function ajax_test_api()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -841,7 +858,8 @@ class AutoSync_Product_Manager {
      * AJAX: Bulk import products (FETCH ONLY - optimized for batch processing)
      * Fetches 500 products per request (max API limit) for batch insertion
      */
-    public function ajax_bulk_import() {
+    public function ajax_bulk_import()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -888,7 +906,8 @@ class AutoSync_Product_Manager {
      * AJAX: Optimized batch insert products (500 at a time)
      * High-performance batch insertion with optimizations for 80,000+ products
      */
-    public function ajax_batch_insert_optimized() {
+    public function ajax_batch_insert_optimized()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -926,7 +945,7 @@ class AutoSync_Product_Manager {
         wp_suspend_cache_addition(true);
         wp_defer_term_counting(true);
         wp_defer_comment_counting(true);
-        
+
         // Disable object cache
         global $wp_object_cache;
         $cache_enabled = wp_using_ext_object_cache();
@@ -944,28 +963,28 @@ class AutoSync_Product_Manager {
 
         // Use raw SQL batch insertion for maximum performance
         require_once ASM_PLUGIN_DIR . 'includes/class-sql-batch-inserter.php';
-        
+
         $result = ASM_SQL_Batch_Inserter::batch_insert_products($products, $image_urls, $type);
-        
+
         // Ensure all values are integers and validate
         $imported = isset($result['imported']) ? (int) $result['imported'] : 0;
         $updated = isset($result['updated']) ? (int) $result['updated'] : 0;
         $skipped = isset($result['skipped']) ? (int) $result['skipped'] : 0;
         $product_ids = isset($result['product_ids']) ? $result['product_ids'] : array();
         $errors = isset($result['errors']) ? $result['errors'] : array();
-        
+
         // Validate values are not NaN
         if (!is_numeric($imported) || is_nan($imported)) $imported = 0;
         if (!is_numeric($updated) || is_nan($updated)) $updated = 0;
         if (!is_numeric($skipped) || is_nan($skipped)) $skipped = 0;
-        
+
         // Ensure they're integers
         $imported = (int) $imported;
         $updated = (int) $updated;
         $skipped = (int) $skipped;
-        
+
         global $wpdb;
-        
+
         // Log results for debugging
         // ASM_Logger::info('Batch insert results', array(
         //     'imported' => $imported,
@@ -1002,10 +1021,10 @@ class AutoSync_Product_Manager {
         $response_total = (int) $product_count;
         $response_duration = is_numeric($duration) && !is_nan($duration) ? round($duration, 2) : 0;
         $response_rate = ($response_total > 0 && $response_duration > 0) ? round($response_total / $response_duration, 2) : 0;
-        
+
         // Note: Email notification is sent only after full sync completion (in ajax_save_sync_status)
         // Not sending batch-wise emails to avoid spam
-        
+
         wp_send_json_success(array(
             'imported' => $response_imported,
             'updated' => $response_updated,
@@ -1021,7 +1040,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Batch insert products (500 at a time) - Legacy method
      */
-    public function ajax_batch_insert() {
+    public function ajax_batch_insert()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -1072,9 +1092,9 @@ class AutoSync_Product_Manager {
         $old_error_reporting = error_reporting(E_ALL);
         $old_display_errors = ini_get('display_errors');
         ini_set('display_errors', 0); // Don't display, but log
-        
+
         // Capture any PHP errors
-        set_error_handler(function($errno, $errstr, $errfile, $errline) use (&$errors) {
+        set_error_handler(function ($errno, $errstr, $errfile, $errline) use (&$errors) {
             $error_msg = "PHP Error [$errno]: $errstr in $errfile on line $errline";
             // ASM_Logger::error($error_msg);
             return false; // Continue with normal error handling
@@ -1087,7 +1107,7 @@ class AutoSync_Product_Manager {
         $errors = array();
         $product_ids = array();
         $start_time = microtime(true);
-        
+
         // ASM_Logger::info('Starting product import loop', array(
         //     'product_count' => $product_count,
         //     'type' => $type,
@@ -1285,14 +1305,14 @@ class AutoSync_Product_Manager {
         //     'error_count' => count($errors),
         //     'has_errors' => count($errors) > 0
         // ));
-        
+
         if (count($errors) > 0) {
             // ASM_Logger::error('❌ ERRORS ENCOUNTERED (' . count($errors) . ' total)', array(
             //     'errors' => $errors,
             //     'first_10_errors' => array_slice($errors, 0, 10)
             // ));
         }
-        
+
         // ASM_Logger::info('═══════════════════════════════════════════════════════', array());
 
         // Include errors in response for debugging
@@ -1308,7 +1328,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Bulk import tires
      */
-    public function ajax_bulk_import_tires() {
+    public function ajax_bulk_import_tires()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -1354,14 +1375,16 @@ class AutoSync_Product_Manager {
     /**
      * Get API client instance
      */
-    public function get_api_client() {
+    public function get_api_client()
+    {
         return $this->api_client;
     }
 
     /**
      * Clear legacy WP-Cron events once after this external-cron-only version loads.
      */
-    public function disable_internal_cron_events() {
+    public function disable_internal_cron_events()
+    {
         if (get_option(self::LEGACY_CRON_CLEANUP_OPTION)) {
             return;
         }
@@ -1374,7 +1397,8 @@ class AutoSync_Product_Manager {
     /**
      * Remove plugin-owned WP-Cron schedules left behind by older versions.
      */
-    private static function clear_internal_cron_events() {
+    private static function clear_internal_cron_events()
+    {
         require_once ASM_PLUGIN_DIR . 'includes/class-cron-sync.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-price-stock-sync.php';
 
@@ -1389,7 +1413,8 @@ class AutoSync_Product_Manager {
     /**
      * Handle activation redirect to settings page
      */
-    public function handle_activation_redirect() {
+    public function handle_activation_redirect()
+    {
         // Check if we should redirect
         if (!get_transient('asm_activation_redirect')) {
             return;
@@ -1422,7 +1447,8 @@ class AutoSync_Product_Manager {
      * Plugin activation hook - Static method
      * Creates hash table on plugin activation
      */
-    public static function activate() {
+    public static function activate()
+    {
         // Define constants if not already defined
         if (!defined('ASM_PLUGIN_DIR')) {
             define('ASM_PLUGIN_DIR', plugin_dir_path(__FILE__));
@@ -1433,7 +1459,7 @@ class AutoSync_Product_Manager {
         if (!defined('ASM_VERSION')) {
             define('ASM_VERSION', '0.0.9');
         }
-        
+
         // Load required files
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
         require_once ASM_PLUGIN_DIR . 'includes/class-brand-manager.php';
@@ -1444,17 +1470,17 @@ class AutoSync_Product_Manager {
 
         // Create cron lock log table
         ASM_Cron_Lock_Log::create_table();
-        
+
         // Older versions scheduled WP-Cron events; this version is external-cron only.
         self::clear_internal_cron_events();
         update_option(self::LEGACY_CRON_CLEANUP_OPTION, time(), false);
-        
+
         // Set transient to trigger redirect after activation
         // Only redirect if not bulk activation
         if (!isset($_GET['activate-multi'])) {
             set_transient('asm_activation_redirect', true, 30);
         }
-        
+
         // Log activation
         if (function_exists('error_log')) {
             error_log('AutoSync Product Manager: Tables created on activation');
@@ -1465,16 +1491,17 @@ class AutoSync_Product_Manager {
      * Plugin deactivation hook - Static method
      * Cleanup: Drop hash table, clear legacy schedules, and delete wp_options
      */
-    public static function deactivate() {
+    public static function deactivate()
+    {
         // Load required files
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
-        
+
         // Clear plugin-owned WP-Cron events on deactivation.
         self::clear_internal_cron_events();
-        
+
         // Drop hash table on deactivation
         ASM_Hash_Manager::drop_table();
-        
+
         // Delete all plugin options from wp_options table
         // Use multiple methods to ensure complete removal
         $options_to_delete = array(
@@ -1489,16 +1516,16 @@ class AutoSync_Product_Manager {
             'asm_price_stock_sync_interval',
             self::LEGACY_CRON_CLEANUP_OPTION
         );
-        
+
         global $wpdb;
-        
+
         foreach ($options_to_delete as $option_name) {
             // Method 1: Use WordPress delete_option function
             delete_option($option_name);
-            
+
             // Method 2: Clear from cache
             wp_cache_delete($option_name, 'options');
-            
+
             // Method 3: Direct database deletion as fallback
             $wpdb->delete(
                 $wpdb->options,
@@ -1506,15 +1533,15 @@ class AutoSync_Product_Manager {
                 array('%s')
             );
         }
-        
+
         // Clear alloptions cache completely
         wp_cache_delete('alloptions', 'options');
-        
+
         // Flush object cache if available
         if (function_exists('wp_cache_flush')) {
             wp_cache_flush();
         }
-        
+
         // Log cleanup
         if (function_exists('error_log')) {
             error_log('AutoSync Product Manager: Plugin deactivated - Options and tables cleaned up');
@@ -1525,20 +1552,21 @@ class AutoSync_Product_Manager {
      * Plugin uninstall hook - Static method
      * Complete cleanup when plugin is deleted
      */
-    public static function uninstall() {
+    public static function uninstall()
+    {
         // Load required files
         if (!defined('ASM_PLUGIN_DIR')) {
             define('ASM_PLUGIN_DIR', plugin_dir_path(__FILE__));
         }
-        
+
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
-        
+
         // Clear plugin-owned WP-Cron events.
         self::clear_internal_cron_events();
-        
+
         // Drop hash table
         ASM_Hash_Manager::drop_table();
-        
+
         // Delete all plugin options from wp_options table
         $options_to_delete = array(
             'asm_api_key',
@@ -1552,16 +1580,16 @@ class AutoSync_Product_Manager {
             'asm_price_stock_sync_interval',
             self::LEGACY_CRON_CLEANUP_OPTION
         );
-        
+
         global $wpdb;
-        
+
         foreach ($options_to_delete as $option_name) {
             // Method 1: Use WordPress delete_option function
             delete_option($option_name);
-            
+
             // Method 2: Clear from cache
             wp_cache_delete($option_name, 'options');
-            
+
             // Method 3: Direct database deletion as fallback
             $wpdb->delete(
                 $wpdb->options,
@@ -1569,15 +1597,15 @@ class AutoSync_Product_Manager {
                 array('%s')
             );
         }
-        
+
         // Clear alloptions cache completely
         wp_cache_delete('alloptions', 'options');
-        
+
         // Flush object cache if available
         if (function_exists('wp_cache_flush')) {
             wp_cache_flush();
         }
-        
+
         // Log cleanup
         if (function_exists('error_log')) {
             error_log('AutoSync Product Manager: Plugin uninstalled - All data cleaned up');
@@ -1587,7 +1615,8 @@ class AutoSync_Product_Manager {
     /**
      * Render hash management page
      */
-    public function render_hash_management_page() {
+    public function render_hash_management_page()
+    {
         if (!current_user_can('manage_options')) {
             return;
         }
@@ -1598,15 +1627,16 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Rebuild hash table
      */
-    public function ajax_rebuild_hash_table() {
+    public function ajax_rebuild_hash_table()
+    {
         // Prevent any output before JSON response
         if (ob_get_level()) {
             ob_clean();
         }
-        
+
         // Set headers
         header('Content-Type: application/json');
-        
+
         try {
             // Verify nonce
             if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'asm_nonce')) {
@@ -1656,11 +1686,10 @@ class AutoSync_Product_Manager {
                 ));
             }
             exit;
-
         } catch (Exception $e) {
             $error_message = $e->getMessage();
             $error_trace = $e->getTraceAsString();
-            
+
             // ASM_Logger::error('Exception in ajax_rebuild_hash_table', array(
             //     'message' => $error_message,
             //     'trace' => $error_trace,
@@ -1673,11 +1702,10 @@ class AutoSync_Product_Manager {
                 'trace' => defined('WP_DEBUG') && WP_DEBUG ? $error_trace : null
             ));
             exit;
-
         } catch (Error $e) {
             $error_message = $e->getMessage();
             $error_trace = $e->getTraceAsString();
-            
+
             // ASM_Logger::error('Fatal error in ajax_rebuild_hash_table', array(
             //     'message' => $error_message,
             //     'trace' => $error_trace,
@@ -1696,7 +1724,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Truncate hash table
      */
-    public function ajax_truncate_hash_table() {
+    public function ajax_truncate_hash_table()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -1705,7 +1734,7 @@ class AutoSync_Product_Manager {
 
         try {
             $result = ASM_Hash_Manager::truncate_table();
-            
+
             if ($result['success']) {
                 wp_send_json_success(array(
                     'message' => $result['message'],
@@ -1726,7 +1755,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Initialize empty price_stock_hash batch process
      */
-    public function ajax_empty_price_stock_hash() {
+    public function ajax_empty_price_stock_hash()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -1735,10 +1765,10 @@ class AutoSync_Product_Manager {
 
         try {
             require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
-            
+
             // Get total count of rows that need to be cleared
             $total_count = ASM_Hash_Manager::get_price_stock_hash_count();
-            
+
             if ($total_count === 0) {
                 wp_send_json_success(array(
                     'message' => 'No price_stock_hash values to clear',
@@ -1774,7 +1804,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Process batch of price_stock_hash clearing
      */
-    public function ajax_empty_price_stock_hash_batch() {
+    public function ajax_empty_price_stock_hash_batch()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -1783,7 +1814,7 @@ class AutoSync_Product_Manager {
 
         try {
             require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
-            
+
             $user_id = get_current_user_id();
             $transient_key = 'asm_empty_price_stock_hash_' . $user_id;
             $batch_state = get_transient($transient_key);
@@ -1798,7 +1829,7 @@ class AutoSync_Product_Manager {
 
             // Process one batch (500 rows)
             $result = ASM_Hash_Manager::empty_price_stock_hash_batch(500);
-            
+
             if (!$result['success']) {
                 wp_send_json_error(array(
                     'message' => $result['message'],
@@ -1809,7 +1840,7 @@ class AutoSync_Product_Manager {
 
             // Update batch state
             $batch_state['processed'] += $result['rows_updated'];
-            
+
             if ($result['has_more']) {
                 // More rows to process
                 set_transient($transient_key, $batch_state, HOUR_IN_SECONDS);
@@ -1847,15 +1878,16 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Check for duplicate SKUs
      */
-    public function ajax_check_duplicate_skus() {
+    public function ajax_check_duplicate_skus()
+    {
         // Prevent any output before JSON response
         if (ob_get_level()) {
             ob_clean();
         }
-        
+
         // Set headers
         header('Content-Type: application/json');
-        
+
         try {
             // Verify nonce
             if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'asm_nonce')) {
@@ -1873,7 +1905,7 @@ class AutoSync_Product_Manager {
             }
 
             global $wpdb;
-            
+
             // Get pagination parameters
             $page = isset($_POST['page']) ? intval($_POST['page']) : 1;
             $per_page = isset($_POST['per_page']) ? intval($_POST['per_page']) : 20;
@@ -1881,14 +1913,19 @@ class AutoSync_Product_Manager {
 
             $posts_table = $wpdb->posts;
             $lookup_table = $wpdb->prefix . 'wc_product_meta_lookup';
-            
+
             // Check if WooCommerce lookup table exists (faster than postmeta)
             $lookup_table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$lookup_table}'") === $lookup_table;
+
+            // Check MySQL version for window function support.
             
-            // Check MySQL version for window function support
+            // $mysql_version = $wpdb->get_var("SELECT VERSION()");
+            // $supports_window_functions = version_compare($mysql_version, '8.0.0', '>=');
+
             $mysql_version = $wpdb->get_var("SELECT VERSION()");
-            $supports_window_functions = version_compare($mysql_version, '8.0.0', '>=');
-            
+            $is_mariadb = stripos($mysql_version, 'mariadb') !== false;
+            $supports_window_functions = $is_mariadb ? version_compare($mysql_version, '10.2.0', '>=') : version_compare($mysql_version, '8.0.0', '>=');
+
             if ($lookup_table_exists && $supports_window_functions) {
                 // OPTIMIZED: Use WooCommerce lookup table with window functions (MySQL 8.0+)
                 $duplicates_query = "
@@ -1917,9 +1954,9 @@ class AutoSync_Product_Manager {
                         )
                     ORDER BY lookup.sku ASC, p.ID ASC
                 ";
-                
+
                 $all_results = $wpdb->get_results($duplicates_query, ARRAY_A);
-                
+
                 // Filter out the first product for each SKU (row_num = 1)
                 $all_duplicates = array();
                 foreach ($all_results as $row) {
@@ -1949,18 +1986,18 @@ class AutoSync_Product_Manager {
                         HAVING COUNT(*) > 1
                         ORDER BY COUNT(*) DESC, lookup.sku ASC
                     ";
-                    
+
                     $duplicate_skus = $wpdb->get_results($duplicate_skus_query, ARRAY_A);
-                    
+
                     if (empty($duplicate_skus)) {
                         $all_duplicates = array();
                     } else {
                         // Get all products with duplicate SKUs in one query
-                        $skus_list = array_map(function($item) use ($wpdb) {
+                        $skus_list = array_map(function ($item) use ($wpdb) {
                             return $wpdb->prepare('%s', $item['sku']);
                         }, $duplicate_skus);
                         $skus_sql = implode(',', $skus_list);
-                        
+
                         $all_products_query = "
                             SELECT 
                                 lookup.sku,
@@ -1974,21 +2011,21 @@ class AutoSync_Product_Manager {
                                 AND p.post_status != 'trash'
                             ORDER BY lookup.sku ASC, p.ID ASC
                         ";
-                        
+
                         $all_products = $wpdb->get_results($all_products_query, ARRAY_A);
-                        
+
                         // Group by SKU and exclude first product for each SKU
                         $all_duplicates = array();
                         $current_sku = null;
                         $sku_count = 0;
-                        
+
                         foreach ($all_products as $product) {
                             if ($product['sku'] !== $current_sku) {
                                 $current_sku = $product['sku'];
                                 $sku_count = 0;
                             }
                             $sku_count++;
-                            
+
                             // Skip first product (original), add rest as duplicates
                             if ($sku_count > 1) {
                                 $all_duplicates[] = array(
@@ -2016,18 +2053,18 @@ class AutoSync_Product_Manager {
                         HAVING COUNT(*) > 1
                         ORDER BY COUNT(*) DESC, pm.meta_value ASC
                     ";
-                    
+
                     $duplicate_skus = $wpdb->get_results($duplicate_skus_query, ARRAY_A);
-                    
+
                     if (empty($duplicate_skus)) {
                         $all_duplicates = array();
                     } else {
                         // Get all products with duplicate SKUs in one query
-                        $skus_list = array_map(function($item) use ($wpdb) {
+                        $skus_list = array_map(function ($item) use ($wpdb) {
                             return $wpdb->prepare('%s', $item['sku']);
                         }, $duplicate_skus);
                         $skus_sql = implode(',', $skus_list);
-                        
+
                         $all_products_query = "
                             SELECT 
                                 pm.meta_value as sku,
@@ -2042,21 +2079,21 @@ class AutoSync_Product_Manager {
                                 AND p.post_status != 'trash'
                             ORDER BY pm.meta_value ASC, p.ID ASC
                         ";
-                        
+
                         $all_products = $wpdb->get_results($all_products_query, ARRAY_A);
-                        
+
                         // Group by SKU and exclude first product for each SKU
                         $all_duplicates = array();
                         $current_sku = null;
                         $sku_count = 0;
-                        
+
                         foreach ($all_products as $product) {
                             if ($product['sku'] !== $current_sku) {
                                 $current_sku = $product['sku'];
                                 $sku_count = 0;
                             }
                             $sku_count++;
-                            
+
                             // Skip first product (original), add rest as duplicates
                             if ($sku_count > 1) {
                                 $all_duplicates[] = array(
@@ -2073,7 +2110,7 @@ class AutoSync_Product_Manager {
             }
 
             $total = count($all_duplicates);
-            
+
             // Apply pagination
             $paginated_duplicates = array_slice($all_duplicates, $offset, $per_page);
 
@@ -2084,10 +2121,9 @@ class AutoSync_Product_Manager {
                 'per_page' => $per_page
             ));
             exit;
-
         } catch (Exception $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Exception in ajax_check_duplicate_skus', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2098,10 +2134,9 @@ class AutoSync_Product_Manager {
                 'message' => 'Error checking duplicate SKUs: ' . $error_message
             ));
             exit;
-
         } catch (Error $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Fatal error in ajax_check_duplicate_skus', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2118,15 +2153,16 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Delete a single duplicate product
      */
-    public function ajax_delete_duplicate_product() {
+    public function ajax_delete_duplicate_product()
+    {
         // Prevent any output before JSON response
         if (ob_get_level()) {
             ob_clean();
         }
-        
+
         // Set headers
         header('Content-Type: application/json');
-        
+
         try {
             // Verify nonce
             if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'asm_nonce')) {
@@ -2144,7 +2180,7 @@ class AutoSync_Product_Manager {
             }
 
             $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
-            
+
             if (!$product_id) {
                 wp_send_json_error(array(
                     'message' => 'Product ID is required'
@@ -2164,7 +2200,7 @@ class AutoSync_Product_Manager {
             // Verify this is actually a duplicate (not the original)
             // Get the SKU
             $sku = $product->get_sku();
-            
+
             if (empty($sku)) {
                 wp_send_json_error(array(
                     'message' => 'Product does not have a SKU'
@@ -2176,7 +2212,7 @@ class AutoSync_Product_Manager {
             global $wpdb;
             $lookup_table = $wpdb->prefix . 'wc_product_meta_lookup';
             $lookup_table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$lookup_table}'") === $lookup_table;
-            
+
             if ($lookup_table_exists) {
                 $count_query = $wpdb->prepare("
                     SELECT COUNT(*) 
@@ -2197,9 +2233,9 @@ class AutoSync_Product_Manager {
                         AND p.post_status != 'trash'
                 ", $sku);
             }
-            
+
             $product_count = intval($wpdb->get_var($count_query));
-            
+
             if ($product_count <= 1) {
                 wp_send_json_error(array(
                     'message' => 'This product is not a duplicate. Only duplicate products can be deleted.'
@@ -2230,10 +2266,10 @@ class AutoSync_Product_Manager {
                     ORDER BY p.ID ASC
                 ", $sku);
             }
-            
+
             $products = $wpdb->get_col($products_query);
             $first_product_id = intval($products[0]);
-            
+
             // Verify this is NOT the first product (original)
             if ($product_id === $first_product_id) {
                 wp_send_json_error(array(
@@ -2244,11 +2280,11 @@ class AutoSync_Product_Manager {
 
             // Delete the product (this will also clean up meta, terms, etc.)
             $deleted = wp_delete_post($product_id, true);
-            
+
             if ($deleted) {
                 // Also clean up hash if exists
                 ASM_Hash_Manager::delete_hash($sku);
-                
+
                 wp_send_json_success(array(
                     'message' => 'Duplicate product deleted successfully',
                     'product_id' => $product_id
@@ -2259,10 +2295,9 @@ class AutoSync_Product_Manager {
                 ));
             }
             exit;
-
         } catch (Exception $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Exception in ajax_delete_duplicate_product', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2273,10 +2308,9 @@ class AutoSync_Product_Manager {
                 'message' => 'Error deleting duplicate product: ' . $error_message
             ));
             exit;
-
         } catch (Error $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Fatal error in ajax_delete_duplicate_product', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2293,15 +2327,16 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Bulk delete all duplicate products (initialize batch processing)
      */
-    public function ajax_bulk_delete_duplicates() {
+    public function ajax_bulk_delete_duplicates()
+    {
         // Prevent any output before JSON response
         if (ob_get_level()) {
             ob_clean();
         }
-        
+
         // Set headers
         header('Content-Type: application/json');
-        
+
         try {
             // Verify nonce
             if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'asm_nonce')) {
@@ -2319,14 +2354,14 @@ class AutoSync_Product_Manager {
             }
 
             global $wpdb;
-            
+
             $posts_table = $wpdb->posts;
             $lookup_table = $wpdb->prefix . 'wc_product_meta_lookup';
             $lookup_table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$lookup_table}'") === $lookup_table;
-            
+
             // Get all duplicate products (excluding originals)
             $all_duplicates = array();
-            
+
             if ($lookup_table_exists) {
                 // Get all duplicate SKUs
                 $duplicate_skus_query = "
@@ -2340,12 +2375,12 @@ class AutoSync_Product_Manager {
                     GROUP BY lookup.sku
                     HAVING COUNT(*) > 1
                 ";
-                
+
                 $duplicate_skus = $wpdb->get_results($duplicate_skus_query, ARRAY_A);
-                
+
                 foreach ($duplicate_skus as $sku_data) {
                     $sku = $sku_data['sku'];
-                    
+
                     // Get all products with this SKU, ordered by ID (oldest first)
                     $products_query = $wpdb->prepare("
                         SELECT p.ID
@@ -2356,9 +2391,9 @@ class AutoSync_Product_Manager {
                             AND p.post_status != 'trash'
                         ORDER BY p.ID ASC
                     ", $sku);
-                    
+
                     $products = $wpdb->get_col($products_query);
-                    
+
                     // Skip the first product (original), add the rest as duplicates
                     if (count($products) > 1) {
                         array_shift($products); // Remove first product
@@ -2379,12 +2414,12 @@ class AutoSync_Product_Manager {
                     GROUP BY pm.meta_value
                     HAVING COUNT(*) > 1
                 ";
-                
+
                 $duplicate_skus = $wpdb->get_results($duplicate_skus_query, ARRAY_A);
-                
+
                 foreach ($duplicate_skus as $sku_data) {
                     $sku = $sku_data['sku'];
-                    
+
                     // Get all products with this SKU, ordered by ID (oldest first)
                     $products_query = $wpdb->prepare("
                         SELECT p.ID
@@ -2396,9 +2431,9 @@ class AutoSync_Product_Manager {
                             AND p.post_status != 'trash'
                         ORDER BY p.ID ASC
                     ", $sku);
-                    
+
                     $products = $wpdb->get_col($products_query);
-                    
+
                     // Skip the first product (original), add the rest as duplicates
                     if (count($products) > 1) {
                         array_shift($products); // Remove first product
@@ -2419,7 +2454,7 @@ class AutoSync_Product_Manager {
             // Convert to integers and remove duplicates
             $all_duplicates = array_unique(array_map('intval', $all_duplicates));
             $total_count = count($all_duplicates);
-            
+
             // Store duplicate IDs in transient for batch processing (expires in 1 hour)
             $user_id = get_current_user_id();
             $transient_key = 'asm_bulk_delete_duplicates_' . $user_id;
@@ -2427,7 +2462,7 @@ class AutoSync_Product_Manager {
                 'product_ids' => $all_duplicates,
                 'total' => $total_count,
                 'processed' => 0,
-                    'deleted' => 0
+                'deleted' => 0
             ), HOUR_IN_SECONDS);
 
             wp_send_json_success(array(
@@ -2438,10 +2473,9 @@ class AutoSync_Product_Manager {
                 'has_more' => true
             ));
             exit;
-
         } catch (Exception $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Exception in ajax_bulk_delete_duplicates', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2452,10 +2486,9 @@ class AutoSync_Product_Manager {
                 'message' => 'Error bulk deleting duplicates: ' . $error_message
             ));
             exit;
-
         } catch (Error $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Fatal error in ajax_bulk_delete_duplicates', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2464,23 +2497,24 @@ class AutoSync_Product_Manager {
 
             wp_send_json_error(array(
                 'message' => 'Fatal error bulk deleting duplicates: ' . $error_message
-                ));
-                exit;
-            }
+            ));
+            exit;
+        }
     }
 
     /**
      * AJAX: Process batch of duplicate products deletion
      */
-    public function ajax_bulk_delete_duplicates_batch() {
+    public function ajax_bulk_delete_duplicates_batch()
+    {
         // Prevent any output before JSON response
         if (ob_get_level()) {
             ob_clean();
         }
-        
+
         // Set headers
         header('Content-Type: application/json');
-        
+
         try {
             // Verify nonce
             if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'asm_nonce')) {
@@ -2518,16 +2552,16 @@ class AutoSync_Product_Manager {
             $total = $batch_data['total'];
             $processed = $batch_data['processed'];
             $deleted = $batch_data['deleted'];
-            
+
             // Batch size - process 50 products at a time
             $batch_size = 50;
             // Since we store remaining IDs, always slice from index 0
             $batch_ids = array_slice($product_ids, 0, $batch_size);
-            
+
             if (empty($batch_ids)) {
                 // All done, clean up transient
                 delete_transient($transient_key);
-                
+
                 wp_send_json_success(array(
                     'message' => 'All duplicates deleted successfully',
                     'total' => $total,
@@ -2540,18 +2574,18 @@ class AutoSync_Product_Manager {
             }
 
             global $wpdb;
-            
+
             // Use faster bulk deletion method similar to ASM_Product_Deleter
             // Disable WordPress hooks temporarily for faster deletion
             remove_action('before_delete_post', 'wp_delete_post_revision');
-            
+
             $batch_deleted = 0;
             $skus_to_clean = array();
-            
+
             // Convert to integers for safety
             $batch_ids = array_map('intval', $batch_ids);
             $batch_ids_str = implode(',', $batch_ids);
-            
+
             // Get SKUs in bulk via SQL (much faster than individual get_post_meta calls)
             if (!empty($batch_ids_str)) {
                 $skus = $wpdb->get_col(
@@ -2564,13 +2598,13 @@ class AutoSync_Product_Manager {
             $variation_ids = $wpdb->get_col("SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ({$batch_ids_str}) AND post_type = 'product_variation'");
             if (!empty($variation_ids)) {
                 $variation_ids_str = implode(',', array_map('intval', $variation_ids));
-                
+
                 // Delete variation meta
                 $wpdb->query("DELETE FROM {$wpdb->postmeta} WHERE post_id IN ({$variation_ids_str})");
-                
+
                 // Delete variation term relationships
                 $wpdb->query("DELETE FROM {$wpdb->term_relationships} WHERE object_id IN ({$variation_ids_str})");
-                
+
                 // Delete variation posts
                 $wpdb->query("DELETE FROM {$wpdb->posts} WHERE ID IN ({$variation_ids_str})");
             }
@@ -2583,24 +2617,24 @@ class AutoSync_Product_Manager {
 
             // Delete posts
             $deleted_result = $wpdb->query("DELETE FROM {$wpdb->posts} WHERE ID IN ({$batch_ids_str})");
-                
+
             if ($deleted_result !== false) {
                 $batch_deleted = $deleted_result;
-                
+
                 // Clean up cache
                 clean_post_cache($batch_ids);
-                
+
                 // Clear object cache
                 foreach ($batch_ids as $product_id) {
                     wp_cache_delete($product_id, 'posts');
                 }
-                
+
                 // Delete hashes for deleted products (bulk delete for performance)
                 if (!empty($skus_to_clean)) {
                     $hash_table_name = ASM_Hash_Manager::get_table_name();
                     $table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$hash_table_name}'") === $hash_table_name;
                     if ($table_exists) {
-                        $escaped_skus = array_map(function($sku) use ($wpdb) {
+                        $escaped_skus = array_map(function ($sku) use ($wpdb) {
                             return "'" . esc_sql($sku) . "'";
                         }, $skus_to_clean);
                         $skus_list = implode(',', $escaped_skus);
@@ -2613,15 +2647,15 @@ class AutoSync_Product_Manager {
                     $result = wp_delete_post($product_id, true);
                     if ($result) {
                         $batch_deleted++;
+                    }
                 }
-            }
 
                 // Delete hashes for products deleted via fallback
                 if (!empty($skus_to_clean)) {
                     $hash_table_name = ASM_Hash_Manager::get_table_name();
                     $table_exists = $wpdb->get_var("SHOW TABLES LIKE '{$hash_table_name}'") === $hash_table_name;
                     if ($table_exists) {
-                        $escaped_skus = array_map(function($sku) use ($wpdb) {
+                        $escaped_skus = array_map(function ($sku) use ($wpdb) {
                             return "'" . esc_sql($sku) . "'";
                         }, $skus_to_clean);
                         $skus_list = implode(',', $escaped_skus);
@@ -2637,7 +2671,7 @@ class AutoSync_Product_Manager {
             $new_processed = $processed + count($batch_ids);
             $new_deleted = $deleted + $batch_deleted;
             $has_more = $new_processed < $total;
-            
+
             // Update transient with new progress - remove processed batch from remaining IDs
             $remaining_ids = array_slice($product_ids, count($batch_ids));
             set_transient($transient_key, array(
@@ -2656,10 +2690,9 @@ class AutoSync_Product_Manager {
                 'completed' => !$has_more
             ));
             exit;
-
         } catch (Exception $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Exception in ajax_bulk_delete_duplicates_batch', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2670,10 +2703,9 @@ class AutoSync_Product_Manager {
                 'message' => 'Error processing batch: ' . $error_message
             ));
             exit;
-
         } catch (Error $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Fatal error in ajax_bulk_delete_duplicates_batch', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2690,7 +2722,8 @@ class AutoSync_Product_Manager {
     /**
      * Render brand management page
      */
-    public function render_brand_management_page() {
+    public function render_brand_management_page()
+    {
         if (!current_user_can('manage_options')) {
             return;
         }
@@ -2701,15 +2734,16 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Initialize inventory and quantity sync (batch processing)
      */
-    public function ajax_sync_inventory_quantity() {
+    public function ajax_sync_inventory_quantity()
+    {
         // Prevent any output before JSON response
         if (ob_get_level()) {
             ob_clean();
         }
-        
+
         // Set headers
         header('Content-Type: application/json');
-        
+
         try {
             // Verify nonce
             if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'asm_nonce')) {
@@ -2742,11 +2776,11 @@ class AutoSync_Product_Manager {
 
             // Get active brands for batch processing
             $brands_structure = ASM_Price_Stock_Sync::get_active_brands_for_batch();
-            
+
             // Count total brands
             $total_tire_brands = count($brands_structure['tires']);
             $total_wheel_brands = count($brands_structure['wheels']);
-            
+
             if ($total_tire_brands == 0 && $total_wheel_brands == 0) {
                 wp_send_json_success(array(
                     'message' => 'No active brands found for price/stock sync',
@@ -2773,7 +2807,7 @@ class AutoSync_Product_Manager {
 
             // Calculate total brands for progress display
             $total_brands = $total_tire_brands + $total_wheel_brands;
-            
+
             // Store batch state in transient (expires in 2 hours)
             $user_id = get_current_user_id();
             $transient_key = 'asm_sync_inventory_quantity_' . $user_id;
@@ -2794,10 +2828,9 @@ class AutoSync_Product_Manager {
                 'completed' => false
             ));
             exit;
-
         } catch (Exception $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Exception in ajax_sync_inventory_quantity', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2808,10 +2841,9 @@ class AutoSync_Product_Manager {
                 'message' => 'Error initializing inventory and quantity sync: ' . $error_message
             ));
             exit;
-
         } catch (Error $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Fatal error in ajax_sync_inventory_quantity', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2828,15 +2860,16 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Process batch of inventory and quantity sync
      */
-    public function ajax_sync_inventory_quantity_batch() {
+    public function ajax_sync_inventory_quantity_batch()
+    {
         // Prevent any output before JSON response
         if (ob_get_level()) {
             ob_clean();
         }
-        
+
         // Set headers
         header('Content-Type: application/json');
-        
+
         try {
             // Verify nonce
             if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'asm_nonce')) {
@@ -2875,7 +2908,7 @@ class AutoSync_Product_Manager {
 
             // Process one batch
             $result = ASM_Price_Stock_Sync::process_batch($batch_state);
-            
+
             $updated_batch_state = $result['batch_state'];
             $batch_stats = $result['batch_stats'];
             $completed = $result['completed'];
@@ -2900,7 +2933,7 @@ class AutoSync_Product_Manager {
             $updated_batch_state['total_updated'] += $batch_stats['updated'];
             $updated_batch_state['total_skipped'] += $batch_stats['skipped'];
             $updated_batch_state['total_errors'] += $batch_stats['errors'];
-            
+
             // Update per-type stats based on current product type
             if ($current_type === 'tire') {
                 $updated_batch_state['tires_updated'] += $batch_stats['updated'];
@@ -2915,7 +2948,7 @@ class AutoSync_Product_Manager {
             if ($completed) {
                 // All done, clean up transient
                 delete_transient($transient_key);
-                
+
                 // Prepare stats for status saving
                 $final_stats = array(
                     'start_time' => isset($batch_state['start_time']) ? $batch_state['start_time'] : microtime(true),
@@ -2933,17 +2966,17 @@ class AutoSync_Product_Manager {
                         'total_errors' => isset($updated_batch_state['wheels_errors']) ? (int)$updated_batch_state['wheels_errors'] : 0
                     )
                 );
-                
+
                 // Calculate duration if not set
                 if (!isset($batch_state['duration']) && isset($batch_state['start_time'])) {
                     $final_stats['duration'] = round(microtime(true) - $batch_state['start_time'], 2);
                 }
-                
+
                 // Save sync status
                 require_once ASM_PLUGIN_DIR . 'includes/class-sync-status-manager.php';
                 $sync_data = ASM_Price_Stock_Sync_Status_Manager::format_sync_data_from_stats($final_stats, 'manual');
                 ASM_Price_Stock_Sync_Status_Manager::save_sync_status($sync_data);
-                
+
                 wp_send_json_success(array(
                     'message' => 'Inventory and quantity sync completed',
                     'total' => $updated_batch_state['total_processed'],
@@ -2959,7 +2992,7 @@ class AutoSync_Product_Manager {
             } else {
                 // Save updated batch state
                 set_transient($transient_key, $updated_batch_state, 2 * HOUR_IN_SECONDS);
-                
+
                 wp_send_json_success(array(
                     'message' => 'Batch processed',
                     'total' => $updated_batch_state['total_processed'], // Running total
@@ -2979,10 +3012,9 @@ class AutoSync_Product_Manager {
                 ));
                 exit;
             }
-
         } catch (Exception $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Exception in ajax_sync_inventory_quantity_batch', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -2993,10 +3025,9 @@ class AutoSync_Product_Manager {
                 'message' => 'Error processing batch: ' . $error_message
             ));
             exit;
-
         } catch (Error $e) {
             $error_message = $e->getMessage();
-            
+
             // ASM_Logger::error('Fatal error in ajax_sync_inventory_quantity_batch', array(
             //     'message' => $error_message,
             //     'file' => $e->getFile(),
@@ -3013,7 +3044,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Fetch brands from API and store in database
      */
-    public function ajax_fetch_brands() {
+    public function ajax_fetch_brands()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3023,7 +3055,7 @@ class AutoSync_Product_Manager {
         // Fetch all tire brands
         $tire_result = $this->api_client->get_all_tire_brands();
         $tire_brands_saved = 0;
-        
+
         if ($tire_result && !empty($tire_result['brands'])) {
             $brands_to_save = array();
             foreach ($tire_result['brands'] as $brand) {
@@ -3042,7 +3074,7 @@ class AutoSync_Product_Manager {
         // Fetch all wheel brands
         $wheel_result = $this->api_client->get_all_wheel_brands();
         $wheel_brands_saved = 0;
-        
+
         if ($wheel_result && !empty($wheel_result['brands'])) {
             $brands_to_save = array();
             foreach ($wheel_result['brands'] as $brand) {
@@ -3069,7 +3101,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Update brand active status
      */
-    public function ajax_update_brand_status() {
+    public function ajax_update_brand_status()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3098,7 +3131,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Batch update brand active status
      */
-    public function ajax_batch_update_brand_status() {
+    public function ajax_batch_update_brand_status()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3106,14 +3140,14 @@ class AutoSync_Product_Manager {
         }
 
         $updates_json = isset($_POST['updates']) ? $_POST['updates'] : '';
-        
+
         if (empty($updates_json)) {
             wp_send_json_error('No updates provided');
         }
 
         // Decode JSON updates
         $updates = json_decode(stripslashes($updates_json), true);
-        
+
         if (!is_array($updates) || empty($updates)) {
             wp_send_json_error('Invalid updates format');
         }
@@ -3124,7 +3158,7 @@ class AutoSync_Product_Manager {
             if (!isset($update['brand_id']) || !isset($update['product_type']) || !isset($update['is_active'])) {
                 continue;
             }
-            
+
             $valid_updates[] = array(
                 'brand_id' => intval($update['brand_id']),
                 'product_type' => sanitize_text_field($update['product_type']),
@@ -3156,7 +3190,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Get activated brands for product type
      */
-    public function ajax_get_activated_brands() {
+    public function ajax_get_activated_brands()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3164,14 +3199,14 @@ class AutoSync_Product_Manager {
         }
 
         $product_type = isset($_POST['product_type']) ? sanitize_text_field($_POST['product_type']) : '';
-        
+
         if (empty($product_type) || !in_array($product_type, array('tire', 'wheel'))) {
             wp_send_json_error('Invalid product type');
         }
 
         $all_brands = ASM_Brand_Manager::get_brands($product_type);
         $activated_brands = array();
-        
+
         foreach ($all_brands as $brand) {
             // Handle both boolean and integer is_active values
             $is_active = is_bool($brand->is_active) ? ($brand->is_active ? 1 : 0) : intval($brand->is_active);
@@ -3192,7 +3227,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Save sync status
      */
-    public function ajax_save_sync_status() {
+    public function ajax_save_sync_status()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3232,7 +3268,7 @@ class AutoSync_Product_Manager {
             ),
             'duration' => isset($sync_data['summary']['total_time']) ? floatval($sync_data['summary']['total_time']) : 0
         );
-        
+
         // Calculate tire and wheel stats from brands array
         if (isset($sync_data['brands']) && is_array($sync_data['brands'])) {
             foreach ($sync_data['brands'] as $brand) {
@@ -3241,7 +3277,7 @@ class AutoSync_Product_Manager {
                 $updated = isset($brand['updated']) ? intval($brand['updated']) : 0;
                 $skipped = isset($brand['skipped']) ? intval($brand['skipped']) : 0;
                 $pages = isset($brand['pages']) ? intval($brand['pages']) : 0;
-                
+
                 if ($product_type === 'tire') {
                     $email_stats['tires']['total_imported'] += $imported;
                     $email_stats['tires']['total_updated'] += $updated;
@@ -3255,20 +3291,20 @@ class AutoSync_Product_Manager {
                 }
             }
         }
-        
+
         // Send email notification
         error_log('ASM: Preparing to send email notification');
         error_log('ASM: Email will be sent to: sdtireandwheel@yopmail.com');
         error_log('ASM: Email stats structure: ' . json_encode($email_stats));
-        
+
         try {
             $email_sent = ASM_Email_Notifier::send_sync_email('all', $email_stats);
-            
+
             // Log email attempt result
             error_log('ASM: Email notification attempt. Result: ' . ($email_sent ? 'SUCCESS' : 'FAILED'));
             error_log('ASM: Email stats: ' . json_encode($email_stats));
             error_log('ASM: Email sent to: sdtireandwheel@yopmail.com');
-            
+
             if ($email_sent) {
                 error_log('ASM: SUCCESS - Email notification sent successfully to sdtireandwheel@yopmail.com');
             } else {
@@ -3294,7 +3330,7 @@ class AutoSync_Product_Manager {
         // Send Slack notification
         try {
             $slack_sent = ASM_Slack_Notifier::send_sync_notification('all', $email_stats);
-            
+
             if ($slack_sent) {
                 error_log('ASM: SUCCESS - Slack notification sent successfully');
             } else {
@@ -3326,7 +3362,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Get sync status
      */
-    public function ajax_get_sync_status() {
+    public function ajax_get_sync_status()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3350,7 +3387,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Check if brands exist and fetch if they don't
      */
-    public function ajax_check_and_fetch_brands() {
+    public function ajax_check_and_fetch_brands()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3359,7 +3397,7 @@ class AutoSync_Product_Manager {
 
         // Check if any brands exist (active or inactive)
         $total_brands = ASM_Brand_Manager::get_total_count();
-        
+
         if ($total_brands > 0) {
             wp_send_json_success(array(
                 'brands_exist' => true,
@@ -3368,11 +3406,11 @@ class AutoSync_Product_Manager {
                 'message' => 'Brands already exist in database'
             ));
         }
-        
+
         // No brands found - fetch from API
         $tire_result = $this->api_client->get_all_tire_brands();
         $tire_brands_saved = 0;
-        
+
         if ($tire_result && !empty($tire_result['brands'])) {
             $brands_to_save = array();
             foreach ($tire_result['brands'] as $brand) {
@@ -3389,7 +3427,7 @@ class AutoSync_Product_Manager {
         // Fetch all wheel brands
         $wheel_result = $this->api_client->get_all_wheel_brands();
         $wheel_brands_saved = 0;
-        
+
         if ($wheel_result && !empty($wheel_result['brands'])) {
             $brands_to_save = array();
             foreach ($wheel_result['brands'] as $brand) {
@@ -3404,7 +3442,7 @@ class AutoSync_Product_Manager {
         }
 
         $total_saved = $tire_brands_saved + $wheel_brands_saved;
-        
+
         if ($total_saved > 0) {
             wp_send_json_success(array(
                 'brands_exist' => false,
@@ -3423,7 +3461,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Delete products by brand
      */
-    public function ajax_delete_products_by_brand() {
+    public function ajax_delete_products_by_brand()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3462,7 +3501,8 @@ class AutoSync_Product_Manager {
     /**
      * AJAX: Get product counts for brands
      */
-    public function ajax_get_brand_product_counts() {
+    public function ajax_get_brand_product_counts()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3488,7 +3528,8 @@ class AutoSync_Product_Manager {
      * AJAX: Delete extra products (products without _is_autosync_product meta)
      * Supports batch processing to handle large deletions efficiently
      */
-    public function ajax_delete_extra_products() {
+    public function ajax_delete_extra_products()
+    {
         check_ajax_referer('asm_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
@@ -3498,7 +3539,7 @@ class AutoSync_Product_Manager {
         // Check if hash table has entries
         require_once ASM_PLUGIN_DIR . 'includes/class-hash-manager.php';
         $hash_count = ASM_Hash_Manager::get_total_count();
-        
+
         if ($hash_count == 0) {
             wp_send_json_error(array(
                 'message' => 'Hash table is empty. Please sync products first before deleting extra products.'
@@ -3507,16 +3548,16 @@ class AutoSync_Product_Manager {
 
         // Load deletion class
         require_once ASM_PLUGIN_DIR . 'includes/class-product-deleter.php';
-        
+
         // Get batch size from request or use default
         $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 500;
         if ($batch_size < 1 || $batch_size > 1000) {
             $batch_size = 500;
         }
-        
+
         // Delete products without _is_autosync_product meta
         $result = ASM_Product_Deleter::delete_extra_products($batch_size);
-        
+
         if ($result['success']) {
             wp_send_json_success(array(
                 'message' => $result['message'],
@@ -3537,7 +3578,8 @@ class AutoSync_Product_Manager {
      *
      * @param int $post_id Post ID being deleted
      */
-    public function delete_product_hash_on_deletion($post_id) {
+    public function delete_product_hash_on_deletion($post_id)
+    {
         // Only process product post types
         $post_type = get_post_type($post_id);
         if ($post_type !== 'product') {
@@ -3546,11 +3588,11 @@ class AutoSync_Product_Manager {
 
         // Get SKU before deletion (post meta still exists at this point)
         $sku = get_post_meta($post_id, '_sku', true);
-        
+
         if (!empty($sku)) {
             // Delete hash for this SKU
             ASM_Hash_Manager::delete_hash($sku);
-            
+
             // Log the hash deletion
             // ASM_Logger::info('Hash deleted on product deletion', array(
             //     'product_id' => $post_id,
@@ -3562,12 +3604,13 @@ class AutoSync_Product_Manager {
     /**
      * Load WooCommerce email class when WooCommerce is initialized
      */
-    public function load_wc_email_class() {
+    public function load_wc_email_class()
+    {
         // Check if WooCommerce is active
         if (!class_exists('WooCommerce')) {
             return;
         }
-        
+
         // Wait for WC_Email to be available (it's loaded during WooCommerce init)
         if (!class_exists('WC_Email')) {
             // If WC_Email isn't loaded yet, hook into woocommerce_init (only once)
@@ -3576,7 +3619,7 @@ class AutoSync_Product_Manager {
             }
             return;
         }
-        
+
         // Load our email class if not already loaded
         if (!class_exists('WC_Email_Product_Sync', false)) {
             $email_file = ASM_PLUGIN_DIR . 'includes/class-wc-email-product-sync.php';
@@ -3595,7 +3638,8 @@ class AutoSync_Product_Manager {
      * @param array $emails Existing email classes
      * @return array Modified email classes
      */
-    public function register_wc_email_class($emails) {
+    public function register_wc_email_class($emails)
+    {
         // Only register if WooCommerce and WC_Email are available
         if (class_exists('WooCommerce') && class_exists('WC_Email')) {
             // Load the class file if not already loaded
@@ -3608,7 +3652,7 @@ class AutoSync_Product_Manager {
                     return $emails;
                 }
             }
-            
+
             // Register the email class
             if (class_exists('WC_Email_Product_Sync')) {
                 try {
@@ -3631,7 +3675,8 @@ class AutoSync_Product_Manager {
 /**
  * Initialize the plugin
  */
-function ASM() {
+function ASM()
+{
     return AutoSync_Product_Manager::instance();
 }
 

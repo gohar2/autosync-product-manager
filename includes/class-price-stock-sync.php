@@ -514,8 +514,10 @@ class ASM_Price_Stock_Sync {
                 'new_hash' => $new_price_stock_hash
             );
             
-            // Prepare hash update - only update existing hash records
-            // Price/stock sync should NOT create new hash records - that's done by full product sync
+            // Always queue a hash row so the next run can short-circuit on a match.
+            // If no record exists yet, seed one with an empty full hash; the next
+            // full sync will compute and persist the real one. batch_save_hashes
+            // preserves any existing real hash on duplicate key.
             $existing_hash_record = isset($hash_records[$sku]) ? $hash_records[$sku] : null;
             if ($existing_hash_record) {
                 $hash_updates[] = array(
@@ -527,14 +529,14 @@ class ASM_Price_Stock_Sync {
                     'price_stock_hash' => $new_price_stock_hash
                 );
             } else {
-                // Hash record doesn't exist - this shouldn't happen if full sync ran first
-                // Log warning and skip hash creation (price/stock sync should only update existing hashes)
-                // ASM_Logger::warning('Price/Stock sync: Hash record not found for SKU in bulk sync. Full product sync may not have run.', array(
-                //     'sku' => $sku,
-                //     'product_id' => $product_id
-                // ));
-                // Don't add to hash_updates - skip hash record creation
-                // Product price/stock will be updated, but hash record creation is skipped
+                $hash_updates[] = array(
+                    'sku' => $sku,
+                    'hash' => '',
+                    'product_id' => $product_id,
+                    'product_type' => $product_type,
+                    'brand' => isset($api_data->Brand) ? $api_data->Brand : null,
+                    'price_stock_hash' => $new_price_stock_hash
+                );
             }
         }
         
@@ -732,11 +734,12 @@ class ASM_Price_Stock_Sync {
         // Save product
         $product->save();
 
-        // Update price_stock_hash in database - only update existing hash records
-        // Price/stock sync should NOT create new hash records - that's done by full product sync
+        // Always persist the price_stock_hash so the next run can short-circuit.
+        // If no record exists yet, seed one with an empty full hash; the next full
+        // sync will fill in the real one. save_hash preserves any existing real
+        // hash when an empty value is passed.
         $existing_hash_record = ASM_Hash_Manager::get_hash_record($sku);
         if ($existing_hash_record) {
-            // Update existing hash record with new price_stock_hash
             ASM_Hash_Manager::save_hash(
                 $sku,
                 $existing_hash_record->hash,
@@ -746,15 +749,14 @@ class ASM_Price_Stock_Sync {
                 $new_price_stock_hash
             );
         } else {
-            // Hash record doesn't exist - this shouldn't happen if full sync ran first
-            // Log warning and skip hash creation (price/stock sync should only update existing hashes)
-            // ASM_Logger::warning('Price/Stock sync: Hash record not found for SKU. Full product sync may not have run.', array(
-            //     'sku' => $sku,
-            //     'product_id' => $product_id,
-            //     'type' => $product_type
-            // ));
-            // Don't create hash record here - it should be created by full product sync
-            // Product price/stock has been updated, but hash record creation is skipped
+            ASM_Hash_Manager::save_hash(
+                $sku,
+                '',
+                $product_id,
+                $product_type,
+                isset($api_data->Brand) ? $api_data->Brand : null,
+                $new_price_stock_hash
+            );
         }
 
         return 'updated';

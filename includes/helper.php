@@ -1,11 +1,11 @@
 <?php
 /**
  * Plugin Name: Helper
- * Plugin URI: https://sdtireandwheel.com/
+ * Plugin URI: https://wordpress-1649893-6713087.cloudwaysapps.com/
  * Description: A plugin to fetch tire records from 3rd party API via AJAX form submission
  * Version: 1.0.0
  * Author: Syed
- * Author URI: https://sdtireandwheel.com/
+ * Author URI: https://wordpress-1649893-6713087.cloudwaysapps.com/
  * License: GPL v2 or later
  * Text Domain: helper-plugin
  */
