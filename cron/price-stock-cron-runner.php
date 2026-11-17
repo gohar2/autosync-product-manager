@@ -56,6 +56,10 @@ if (!$allowed) {
     }
 }
 
+// Cap the external cron log before this run appends to it
+require_once __DIR__ . '/log-rotate.php';
+asm_cron_rotate_log();
+
 // Load WordPress
 // Try multiple possible paths.
 // NOTE: This script is typically located at:

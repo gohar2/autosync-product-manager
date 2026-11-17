@@ -2737,11 +2737,20 @@ class ASM_SQL_Batch_Inserter {
             
             $attributes_to_insert = array();
             
+            // Stock status for the whole chunk in one query (was one query per term row)
+            $stock_statuses = $wpdb->get_results(
+                "SELECT post_id, meta_value FROM {$wpdb->postmeta}
+                WHERE post_id IN ({$ids_sql}) AND meta_key = '_stock_status'",
+                OBJECT_K
+            );
+            
             foreach ($attribute_taxonomies as $attribute) {
                 $taxonomy = wc_attribute_taxonomy_name($attribute->attribute_name);
                 
-                // Get all term relationships for this taxonomy for these products
-                $attr_term_relationships = $wpdb->get_results(
+                // Get all term relationships for this taxonomy for these products.
+                // Must go through prepare(): get_results()'s 2nd argument is the output type,
+                // so passing $taxonomy there left a literal %s in the SQL and the query always failed.
+                $attr_term_relationships = $wpdb->get_results($wpdb->prepare(
                     "SELECT tr.object_id as product_id, tt.term_id, tt.term_taxonomy_id
                     FROM {$wpdb->term_relationships} tr
                     INNER JOIN {$wpdb->term_taxonomy} tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
@@ -2751,18 +2760,17 @@ class ASM_SQL_Batch_Inserter {
                     AND p.post_type = 'product'
                     AND p.post_status = 'publish'",
                     $taxonomy
-                );
+                ));
+                
+                if (empty($attr_term_relationships)) {
+                    continue;
+                }
                 
                 foreach ($attr_term_relationships as $rel) {
                     $product_id = intval($rel->product_id);
                     $term_id = intval($rel->term_id);
                     
-                    // Get stock status for this product
-                    $stock_status = $wpdb->get_var($wpdb->prepare(
-                        "SELECT meta_value FROM {$wpdb->postmeta} 
-                        WHERE post_id = %d AND meta_key = '_stock_status'",
-                        $product_id
-                    ));
+                    $stock_status = isset($stock_statuses[$product_id]) ? $stock_statuses[$product_id]->meta_value : null;
                     $in_stock = ($stock_status === 'instock' || $stock_status === 'onbackorder') ? 1 : 0;
                     
                     $attributes_to_insert[] = array(
